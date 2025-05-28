@@ -1,0 +1,3 @@
+[submodule "src/kukavarproxy_ros/kukavarproxy_ros/kukapythonvarproxy"]
+	path = src/kukavarproxy_ros/kukapythonvarproxy
+	url = ssh://git@git.ram.eemcs.utwente.nl:20022/ram-microrobotics/kukapythonvarproxy.git
