@@ -1,8 +1,8 @@
 import rclpy
 from rclpy.node import Node
 from kukapythonvarproxy.KRL_Pos import KRLPos
+from kukapythonvarproxy.KRL_Parameter import KRLParam
 from kuka_interfaces.msg import KukaWriteVariable, KukaAction
-from rclpy.executors import SingleThreadedExecutor
 from kuka_interfaces.srv import KukaReadVariable
 from kuka_interfaces.msg import KukaPos
 from std_msgs.msg import Bool
@@ -19,6 +19,15 @@ class KukaCommander(Node):
         self.newest_position = None
 
         self.kuka_action_pub = self.create_publisher(KukaAction, "kuka/action", 10)
+        action = KukaAction()
+        rounding = KRLParam("COM_ROUNDM")
+        rounding.set_value("1")
+        action.com_action = 8
+        rounding_var = KukaWriteVariable()
+        rounding_var.name = "COM_ROUNDM"
+        rounding_var.value = rounding.get_KRL_string()
+        action.variable = [rounding_var]
+        self.kuka_action_pub.publish(action)
 
     def update_position(self, msg: KukaPos):
         # Callback to receive new target pose
@@ -46,20 +55,17 @@ class KukaCommander(Node):
         self.kuka_action_pub.publish(action)
         self.get_logger().info("Published joint move command.")
 
+        
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = KukaCommander()
-
-    executor = SingleThreadedExecutor()
-    executor.add_node(node)
-
     try:
-        executor.spin()
+        rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    finally:
-        executor.remove_node(node)
+    finally: 
         node.destroy_node()
         rclpy.shutdown()
 
