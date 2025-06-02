@@ -2,23 +2,23 @@ import rclpy
 from rclpy.node import Node
 from kukapythonvarproxy.KRL_Pos import KRLPos
 from kukapythonvarproxy.KRL_Parameter import KRLParam
-from kuka_interfaces.msg import KukaWriteVariable, KukaAction
+from kuka_interfaces.msg import KukaWriteVariable, KukaAction, KukaPos
 from kuka_interfaces.srv import KukaReadVariable
-from kuka_interfaces.msg import KukaPos
 from std_msgs.msg import Bool
-import numpy as np
 
+import numpy as np
 import time
 
 class KukaCommander(Node):
     def __init__(self):
         super().__init__("kuka_commander")
-        self.position_ready = self.create_subscription(Bool, "kuka/position_ready", self.publish_joint_move, 1)
-
+        self.position_ready_sub = self.create_subscription(Bool, "kuka/position_ready", self.publish_joint_move, 1)
         self.newest_position_sub = self.create_subscription(KukaPos, "python/target_position",self.update_position, 1)
+        self.kuka_action_pub = self.create_publisher(KukaAction, "kuka/action", 10)
+
         self.newest_position = None
 
-        self.kuka_action_pub = self.create_publisher(KukaAction, "kuka/action", 10)
+        # Set the correct rounding
         action = KukaAction()
         rounding = KRLParam("COM_ROUNDM")
         rounding.set_value("1")
@@ -30,6 +30,7 @@ class KukaCommander(Node):
         self.kuka_action_pub.publish(action)
 
     def update_position(self, msg: KukaPos):
+
         # Callback to receive new target pose
         self.newest_position = (msg.x, msg.y, msg.z, msg.a, msg.b, msg.c)
         self.get_logger().info(f'Received new target pose: {self.newest_position}')
@@ -54,10 +55,7 @@ class KukaCommander(Node):
         action.variable = [target_pos]
         self.kuka_action_pub.publish(action)
         self.get_logger().info("Published joint move command.")
-
         
-
-
 def main(args=None):
     rclpy.init(args=args)
     node = KukaCommander()
