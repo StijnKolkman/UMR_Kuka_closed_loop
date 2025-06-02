@@ -7,7 +7,7 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=[
                 'python3',
-                'Stijn/recorder.py'  # or wherever you placed it
+                'Stijn/recorder.py' 
             ],
             output='screen'
         ),

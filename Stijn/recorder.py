@@ -1,21 +1,20 @@
 import time
 import cv2
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import numpy as np 
 import os
-import subprocess 
 import csv
 import math
+import rclpy
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-from main import kuka_python
-
-cap_api = cv2.CAP_DSHOW  # Found to be the best API for using with logitech C920 in Windows. Other options are also possible
+from python_kuka_communicator import kuka_python
 
 class ClosedLoopRecorder:
     def __init__(self, window):
@@ -32,11 +31,13 @@ class ClosedLoopRecorder:
         # Nx3 array: [x (mm), y (mm), angle (deg)]
         #self.trajectory = np.loadtxt("trajectory.csv", delimiter=",")
 
+
         self.controller_boolean = False
+        self.motor_velocity_rad = 0.0
 
 
         # Initialize variables for box, UMRs, reconstruction
-        self.i = 0
+        #self.i = 0
         self.pose = None
         self.box_1_roi = None   
         self.box_2_roi = None
@@ -83,10 +84,14 @@ class ClosedLoopRecorder:
         self.window.geometry("1920x700")
 
         # Cameras or videos
+        cap_api = cv2.CAP_DSHOW  # Found to be the best API for using with logitech C920 in Windows. Other options are also possible
         #self.cap1 = cv2.VideoCapture(0)  # Uncomment if real cameras used
         #self.cap2 = cv2.VideoCapture(0)
         self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/Coated_pitch1_0_4hz_v2_cam1.avi")
         self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/Coated_pitch1_0_4hz_v2_cam2.avi")
+        self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+
 
         # Setup 3 main frames side by side: cam1, cam2, plot
         self.cam1_frame = tk.Frame(self.window, bd=2, relief="sunken")
@@ -117,6 +122,8 @@ class ClosedLoopRecorder:
         self.ax3d = self.fig.add_subplot(111, projection='3d')
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        toolbar = NavigationToolbar2Tk(self.canvas, self.plot_frame)
+        toolbar.update()
 
         # === Controls in controls_frame ===
         # Left column for labels, entries, sliders, buttons
@@ -229,8 +236,7 @@ class ClosedLoopRecorder:
         if self.controller_boolean:
             self.kuka_python.set_motor_speed(self.motor_velocity_rad)
         else:
-            self.motor_velocity_rad = 0.0
-            self.kuka_python.set_motor_speed(self.motor_velocity_rad)
+            self.kuka_python.set_motor_speed(0.0)
 
     def toggle_recording(self):
         self.recording = not self.recording
@@ -382,9 +388,9 @@ class ClosedLoopRecorder:
         Z_box = self.cam2_to_box_distance  # depth in meters
         self.Z_shift = (origin_box2_y_px - self.cy_cam2) * Z_box / self.fy_cam2
 
-        #print("X_shift:", self.X_shift)
-        #print("Y_shift:", self.Y_shift)
-        #print("Z_shift:", self.Z_shift)
+        #now make the trajectory! linear or curved
+        #self.trajectory_3d = self.generate_relative_linear_trajectory(length_mm=100,num_points=50,direction_deg=0.0)
+        self.trajectory_3d = self.generate_curved_trajectory_3d(radius_mm=100,arc_angle_deg=90.0,num_points=50,direction_deg=0.0,turn_left=True)
 
     def update_trajectory_plot(self):
 
@@ -400,7 +406,15 @@ class ClosedLoopRecorder:
 
         # Plot trajectory if available
         if X.size > 0:
-            self.ax3d.plot(X, Y, Z, color='blue', linewidth=2, label='Trajectory')
+            self.ax3d.plot(X, Y, Z, color='blue', linewidth=4, label='Trajectory')
+        
+        if hasattr(self, 'trajectory_3d'):
+            # trajectory_3d[:,0:3] are x_mm,y_mm,z_mm
+            planned = np.array(self.trajectory_3d)
+            planned_X = planned[:, 0]
+            planned_Y = planned[:, 1]
+            planned_Z = planned[:, 2]
+            self.ax3d.plot(planned_X, planned_Y, planned_Z, label="Planned",color='black',linestyle='--')
 
         # Draw 3D box (rectangular prism)
         w = self.real_box_width_cam1_mm      # width in mm
@@ -449,7 +463,7 @@ class ClosedLoopRecorder:
         self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
 
         #self.ax3d.view_init(elev=90, azim=270) #--> view cam 1
-        self.ax3d.view_init(elev=30, azim=250) 
+        #self.ax3d.view_init(elev=30, azim=250) 
 
         self.ax3d.legend()
         self.canvas.draw()
@@ -469,8 +483,8 @@ class ClosedLoopRecorder:
         get the current pose of the kuka.
         """
         x_kuka, y_kuka, z_kuka = self.kuka_python.get_position()
-        self.get_logger().info(f"Got a current Kuka position: {x_kuka,y_kuka,z_kuka}")
-        #print(f"kuka pose: {self.pose}")
+        #self.get_logger().info(f"Got a current Kuka position: {x_kuka,y_kuka,z_kuka}")
+        print(f"kuka pose: {self.pose}")
         return x_kuka, y_kuka, z_kuka
 
     def update_trajectory(self):
@@ -505,7 +519,7 @@ class ClosedLoopRecorder:
         Z2_next = self.cam2_to_box_distance+Y_3d_next
         self.Z1.append(Z1_next)
         self.Z2.append(Z2_next)
-        print(f"Z1={Z1_next:.4f} m, Z2={Z2_next:.4f} m")
+        #print(f"Z1={Z1_next:.4f} m, Z2={Z2_next:.4f} m")
 
         # Make the first position 0,0,0
         #X_3d -= X_3d[0]
@@ -582,7 +596,9 @@ class ClosedLoopRecorder:
         # Update the reconstructed pose and angle based on the UMRs and box positions
         if self.reconstruction_boolean is True:
             self.update_trajectory()
-            self.update_trajectory_plot()
+
+            if len(self.X_3d) % 5 == 0:  # only redraw every 5th frame
+                self.update_trajectory_plot()
             self.angle_1, self.angle_2 = self.angle_filter(self.UMR_1_angle_measured, self.UMR_2_angle_measured)
             self.angle1_label.config(text=f"Angle 1: {self.angle_1:.2f}°")
             self.angle2_label.config(text=f"Angle 2: {self.angle_2:.2f}°")
@@ -758,12 +774,131 @@ class ClosedLoopRecorder:
         self.Kuka_control_start_x, self.Kuka_control_start_y, self.Kuka_control_start_z = self.get_current_pose()
 
     def set_new_velocity(self):
-        hz_velocity = float(self.velocity_entry.get())
+        raw = self.velocity_entry.get()
+        try:
+            hz_velocity = float(raw)
+        except ValueError:
+            messagebox.showerror(
+                "Invalid input",
+                f"“{raw}” is not a valid number.\nPlease enter a numeric value (e.g. 1.5)."
+            )
+            return
+
         rad_per_sec_velocity = hz_velocity * 2 * math.pi  # Convert Hz to rad/s
         self.motor_velocity_rad = rad_per_sec_velocity
-        print(f"motor velocity is set to: {hz_velocity} hz")
+        print(f"motor velocity is set to: {hz_velocity} Hz")
+
+    def compute_initial_world_xyz(self):
+
+        u = self.umr_1_center_x
+        v = self.umr_1_center_y
+        Z1 = self.Z1_initial  # camera1 → object distance (m)
+
+        X_rel = (u - self.cx_cam1) * Z1 / self.fx_cam1
+        Y_rel = (v - self.cy_cam1) * Z1 / self.fy_cam1
+
+        # Shift into “box‐corner” world frame in X and Y
+        X0 = X_rel - self.X_shift
+        Y0 = -(Y_rel - self.Y_shift)
+
+        # Compute Z relative to the box plane (i.e. how far above the box)
+        #   If the box plane sits at distance = cam1_to_box_distance,
+        #   then the object’s depth above the box plane is:
+        Z0 = self.Z1_initial - self.cam1_to_box_distance
+
+        return X0, Y0, Z0
+
+    def generate_relative_linear_trajectory(self,length_mm=100,num_points=50,direction_deg=0.0):
+
+        #get initial world‐XYZ (in meters), then convert to millimeters
+        X0_m, Y0_m, Z0_m = self.compute_initial_world_xyz()
+        X0 = X0_m * 1000.0
+        Y0 = Y0_m * 1000.0
+        Z0 = Z0_m * 1000.0
+
+        #compute endpoint (in mm) along XY‐direction
+        theta_rad = math.radians(direction_deg)
+        dx = length_mm * math.cos(theta_rad)
+        dy = length_mm * math.sin(theta_rad)
+        X1 = X0 + dx
+        Y1 = Y0 + dy
+
+        # linearly interpolate X, Y; keep Z constant at Z0
+        x_vals = np.linspace(X0, X1, num_points)
+        y_vals = np.linspace(Y0, Y1, num_points)
+        z_vals = np.full(num_points, Z0, dtype=np.float64)
+        theta_array = np.full(num_points, direction_deg, dtype=np.float64)
+
+        # Stack into (num_points × 4): [x_mm, y_mm, z_mm, θ_deg]
+        trajectory_3d = np.vstack((x_vals, y_vals, z_vals, theta_array)).T
+
+        return trajectory_3d
+
+    def generate_curved_trajectory_3d(self,radius_mm=100,arc_angle_deg=90.0,num_points=50,direction_deg=0.0,turn_left=True):
+
+        # Get initial world XYZ (in meters), convert to mm
+        X0_m, Y0_m, Z0_m = self.compute_initial_world_xyz()
+        X0 = X0_m * 1000.0
+        Y0 = Y0_m * 1000.0
+        Z0 = Z0_m * 1000.0  # height stays fixed
+
+        #Convert initial heading to radians
+        psi0 = math.radians(direction_deg)
+
+        sweep_rad = math.radians(arc_angle_deg)
+        if not turn_left:
+            sweep_rad = -sweep_rad
+
+        #Compute the center of the circle in the world frame (mm)
+        #    Given starting pose (X0, Y0) and heading psi0, a left turn
+        #    center is located at:
+        #       Xc = X0 - R * sin(psi0)
+        #       Yc = Y0 + R * cos(psi0)
+        #    For a right turn, the sign flips:
+        #       Xc = X0 + R * sin(psi0)
+        #       Yc = Y0 - R * cos(psi0)
+        if turn_left:
+            Xc = X0 - radius_mm * math.sin(psi0)
+            Yc = Y0 + radius_mm * math.cos(psi0)
+        else:
+            Xc = X0 + radius_mm * math.sin(psi0)
+            Yc = Y0 - radius_mm * math.cos(psi0)
+
+        # 5) Sample 'phi' from 0 to sweep_rad in num_points steps
+        phi = np.linspace(0, sweep_rad, num_points)
+
+        # 6) For each phi_i, the world‐frame coordinates are:
+        #    Xi = Xc + R * sin(psi0 + phi_i)   (if left), or
+        #         Xc - R * sin(psi0 + phi_i)   (if right)
+        #    Yi = Yc - R * cos(psi0 + phi_i)   (left), or
+        #         Yc + R * cos(psi0 + phi_i)   (right)
+        #    But actually the “+/-” sign is handled by sweep_rad’s sign above.
+        #    A unified formula (with sweep_rad signed) is:
+        Xs = Xc + radius_mm * np.sin(psi0 + phi)
+        Ys = Yc - radius_mm * np.cos(psi0 + phi)
+
+        # 7) Tangent heading at each waypoint = psi0 + phi + (±90°)
+        #    For a left turn, tangent = psi0 + phi + 90°  (π/2 rad)
+        #    For a right turn, tangent = psi0 + phi - 90° (-π/2 rad)
+        if turn_left:
+            theta_rad = psi0 + phi + (math.pi / 2)
+        else:
+            theta_rad = psi0 + phi - (math.pi / 2)
+
+        # Convert to degrees, wrap into [0,360)
+        theta_deg = (np.degrees(theta_rad)) % 360
+
+        # 8) Z stays fixed at Z0 for all points
+        Zs = np.full(num_points, Z0, dtype=np.float64)
+
+        # 9) Stack into (num_points × 4): [x_mm, y_mm, z_mm, θ_deg]
+        trajectory_3d = np.vstack((Xs, Ys, Zs, theta_deg)).T
+        return trajectory_3d
 
     def on_closing(self):
+        if self.recording:
+            self.out1.release()
+            self.out2.release()
         self.cap1.release()
         self.cap2.release()
         self.window.destroy()
