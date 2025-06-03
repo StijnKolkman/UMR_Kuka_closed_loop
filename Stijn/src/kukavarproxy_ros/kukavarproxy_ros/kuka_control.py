@@ -34,8 +34,8 @@ from tf2_ros import TransformBroadcaster
 # sudo ip link set eth0 up
 def main():
     rclpy.init()
-    kuka = fakeKUKA()
-    # kuka = KUKA("172.31.1.147")
+    #kuka = fakeKUKA()
+    kuka = KUKA("172.31.1.147")
     kuka_node = KukaControl(kuka)
     kuka_node.get_logger().info("Kuka control node started")
     rclpy.spin(kuka_node)

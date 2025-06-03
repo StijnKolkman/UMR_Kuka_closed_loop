@@ -21,13 +21,25 @@ class KukaCommander(Node):
         # Set the correct rounding
         action = KukaAction()
         rounding = KRLParam("COM_ROUNDM")
-        rounding.set_value("1")
+        rounding.set_value("20")
         action.com_action = 8
         rounding_var = KukaWriteVariable()
         rounding_var.name = "COM_ROUNDM"
         rounding_var.value = rounding.get_KRL_string()
         action.variable = [rounding_var]
         self.kuka_action_pub.publish(action)
+
+        # # set toolframe
+        # action = KukaAction()
+        # tool_frame = KukaWriteVariable()
+        # tool_frame.name = "COM_FRAME"
+
+        # tool = KRLPos("COM_FRAME")
+        # tool.set_all(0.0,140.0,36.0,90.0,0.0,180.0)
+        # tool_frame.value = tool.get_KRL_string()
+        # action.com_action = 5
+        # action.variable = [tool_frame]
+        # self.kuka_action_pub.publish(action)
 
     def update_position(self, msg: KukaPos):
 
