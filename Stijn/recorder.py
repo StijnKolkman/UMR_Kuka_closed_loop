@@ -552,9 +552,9 @@ class ClosedLoopRecorder:
         self.i = 1
         self.pose = self.get_current_pose()
         print(self.pose)
-        #dx = (self.i, 0.0, 0.0, 0.0, 0.0, 0.0)
-        #self.pose = tuple(p + dp for p, dp in zip(self.pose, dx))
-        #self.send_pose()
+        dx = (self.i, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.pose = tuple(p + dp for p, dp in zip(self.pose, dx))
+        self.send_pose()
         #self.i += 4
 
 
