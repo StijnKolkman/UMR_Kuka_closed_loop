@@ -103,8 +103,8 @@ class ClosedLoopRecorder:
         # 3) Open video captures
         # ----------------------------
         # If using actual cameras: cv2.VideoCapture(0), cv2.VideoCapture(1)
-        self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/Coated_pitch1_0_4hz_v2_cam1.avi")
-        self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/Coated_pitch1_0_4hz_v2_cam2.avi")
+        self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/videos/Coated_pitch1_0_4hz_v2_cam1.avi")
+        self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/videos/Coated_pitch1_0_4hz_v2_cam2.avi")
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
 
