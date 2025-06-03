@@ -14,7 +14,7 @@ from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-from python_kuka_communicator_thread import start_kuka_node
+from kuka_python_node.kuka_node import start_kuka_node
 
 class ClosedLoopRecorder:
     def __init__(self, window):

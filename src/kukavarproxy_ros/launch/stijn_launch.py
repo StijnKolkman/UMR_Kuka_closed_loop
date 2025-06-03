@@ -12,7 +12,7 @@ def generate_launch_description():
             output='screen'
         ),
         Node(
-            package='kukavarproxy_ros',
+            package='kuka_python_node',
             executable='kuka_commander',
             name='kuka_commander',
             output='screen'
