@@ -46,6 +46,8 @@ class ClosedLoopRecorder:
         self.UMR_2_center_y = None
         self.UMR_1_bounding_box = None
         self.UMR_2_bounding_box = None
+        self.kuka_start_pos = None
+        self.kuka_start_rot = None
         self.reconstruction_boolean = False
 
         # Known box dimensions (mm)
@@ -476,24 +478,31 @@ class ClosedLoopRecorder:
         self.ax3d.legend()
         self.canvas.draw()
 
-    def send_pose(self):
+    def send_pose(self,pos,rot):
         """
-        Publish the pose to the ROS topic.
+        Publish the pose to the ROS topic. pos, rot should be in meter and radians
         """
-        if self.pose is not None:
-            self.kuka_python.publish_pose(self.pose)
-            print(f"Published pose: {self.pose}")
+
+        if pos is not None and rot is not None:
+            #first convert to mm and degrees
+            pos_mm = pos*1000
+            rot_deg = np.degrees(rot)
+            
+            pose = np.concatenate((pos_mm,rot_deg)) 
+            self.kuka_python.publish_pose(pose)
+            print(f"Published pose: {pose}")
         else:
             print("No pose to publish.")
  
     def get_current_pose(self):
         """"
-        get the current pose of the kuka.
+        get the current pose of the kuka in m and radians
         """
         kuka_pose = self.kuka_python.get_position()
-        #self.get_logger().info(f"Got a current Kuka position: {x_kuka,y_kuka,z_kuka}")
         print(f"kuka pose: {kuka_pose}")
-        return kuka_pose
+        pos = np.array(kuka_pose[0:3], dtype=float)
+        rot = np.array(kuka_pose[3:6], dtype=float)
+        return pos, rot
 
     def update_trajectory(self):
 
@@ -548,14 +557,11 @@ class ClosedLoopRecorder:
 
         ret1, frame1 = self.cap1.read()
         ret2, frame2 = self.cap2.read()
-        #self.pose = (583.0+self.i,388.0,722.1,90.0,0.0,0.0)
-        self.i = 1
-        self.pose = self.get_current_pose()
-        print(self.pose)
-        dx = (self.i, 0.0, 0.0, 0.0, 0.0, 0.0)
-        self.pose = tuple(p + dp for p, dp in zip(self.pose, dx))
-        self.send_pose()
-        #self.i += 4
+
+        #self.i = 0.001 #this is in meter
+        #pos, rot = self.get_current_pose()  # both should be np.array([x, y, z]) and np.array([a, b, c])
+        #pos_new = pos + np.array([self.i, 0, 0])
+        #self.send_pose(pos_new,rot)
 
 
         if self.recording and ret1 and ret2:
@@ -620,7 +626,7 @@ class ClosedLoopRecorder:
             if self.reconstruction_boolean is False:
                 print("First turn the reconstructor on")
                 return
-            #self.trajectory_tracking_control()
+            self.trajectory_tracking_control()
 
         self.window.after(10, self.update_frame)        
 
@@ -752,38 +758,48 @@ class ClosedLoopRecorder:
         return index
 
     def trajectory_tracking_control(self):
-        if self.trajectory is None or len(self.trajectory) == 0:
+        if self.trajectory_3d is None or len(self.trajectory_3d) == 0:
             return
 
-        # Get current filtered position and angle
-        current_x = self.UMR_1_center_x
-        current_y = self.UMR_1_center_y
-        current_angle = self.angle_1
+        # Update the position of the kuka
+        current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
+        start_pos = np.array([self.X_3d[0],self.Y_3d[0],self.Z_3d[0]])
 
-        # Find nearest trajectory point
-        idx = self.find_nearest_trajectory_point(current_x, current_y)
-        lookahead = 3  # optional small offset
-        idx = min(idx + lookahead, len(self.trajectory) - 1)
+        delta_pos = current_pos-start_pos
+        kuka_new_pos = self.kuka_start_pos + delta_pos
 
-        target_x, target_y, target_angle = self.trajectory[idx]
+        # Update the orientation of the kuka
+        current_angle = np.radians(self.angle_1)
+        delta_rot = np.array([current_angle,0,0])
+        kuka_new_rot = self.kuka_start_rot+delta_rot
 
-        # 3. Compute control errors
-        error_pos = np.array([target_x - current_x, target_y - current_y])
-        #TODO here calculate needed change in angle with some law
+        #send the new position and rotation
+        self.send_pose(kuka_new_pos,kuka_new_rot)
 
-        # compute control signals (simple P-controller here, tune gains)
-        Kp_pos
-        Kp_angle
+        # # Find nearest trajectory point
+        # idx = self.find_nearest_trajectory_point(current_x, current_y)
+        # idx = min(idx, len(self.trajectory) - 1)
 
-        control_translation = Kp_pos * error_pos
-        control_rotation = Kp_angle * error_angle
+        # target_x, target_y, target_angle = self.trajectory[idx]
 
-        self.pose = (current_x+self.initial_x_kuka,current_y+self.initial_y_kuka,self.initial_z_kuka,self.initial_alpha_kuka, self.initial_beta_kuka, steering_angle+self.initial_gamma_kuka)
-        self.send_pose()
+        # # 3. Compute control errors
+        # error_pos = np.array([target_x - current_x, target_y - current_y])
+        # #TODO here calculate needed change in angle with some law
+
+        # # compute control signals (simple P-controller here, tune gains)
+        # Kp_pos
+        # Kp_angle
+
+        # control_translation = Kp_pos * error_pos
+        # control_rotation = Kp_angle * error_angle
+
+        # self.pose = (current_x+self.initial_x_kuka,current_y+self.initial_y_kuka,self.initial_z_kuka,self.initial_alpha_kuka, self.initial_beta_kuka, steering_angle+self.initial_gamma_kuka)
+        # self.send_pose()
         return 
 
     def calibrate_kuka(self):
-        #self.Kuka_control_start_x, self.Kuka_control_start_y, self.Kuka_control_start_z = self.get_current_pose()
+        #get the starting position of the kuka
+        self.kuka_start_pos,self.kuka_start_rot = self.get_current_pose()
         self.calibrate_kuka_button.config(text="Kuka Calibrated",style='CalibrateKukaDone.TButton')
 
     def set_new_velocity(self):
@@ -933,7 +949,3 @@ if __name__ == "__main__":
     #TODO fix the angle calculation for the UMR's
     #TODO: klaarmaken voor live video door verwijderen: select_roi:verplaats naar eerste frame 
     #TODO: finish the closed loop controller and update the self.pose there 
-    #TODO: get the pose from the kuka with the correct angle
-    #TOD0: update kuka calibration function
-    #self.pose = (3.14,0.0,0.0,0.0,0.0,0.0)
-    #self.send_pose()

@@ -6,6 +6,7 @@ from scipy.spatial.transform import Rotation as R
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float32
 import time
+import numpy as np
 
 from tf2_ros import TransformException
 from tf2_ros import Buffer
@@ -25,7 +26,7 @@ class kuka_python(Node):
 
         self.x = self.y = self.z = 0.0  # Init default position
         self.a = self.b = self.c = 0.0
-        self.kuka_pose = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.kuka_pose = np.zeros(6)
 
     #def send_action(self, com_action: int, variable_list: list(KukaWriteVariable)):
     #    action = KukaAction()
@@ -37,8 +38,8 @@ class kuka_python(Node):
     def get_position(self):
         try:
             transform = self.tf_buffer.lookup_transform(
-                "kuka_base",  # target frame
-                "kuka_tool",       # source frame
+                "base_link",  # target frame
+                "tool",       # source frame
                 rclpy.time.Time()
             )
 
@@ -46,7 +47,7 @@ class kuka_python(Node):
             rot = transform.transform.rotation
 
             r = R.from_quat([rot.x, rot.y, rot.z, rot.w])
-            a, b, c = r.as_euler("xyz", degrees=False)
+            c, b, a = r.as_euler("xyz", degrees=False)
 
             self.kuka_pose = (pos.x, pos.y, pos.z, a, b, c)
             self.get_logger().info(f"kuka_pose updated: {self.kuka_pose}")
