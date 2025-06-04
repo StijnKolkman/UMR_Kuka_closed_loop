@@ -22,11 +22,6 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "kuka_control = " + package_name + ".kuka_control:main",
-            "action_pub = kukavarproxy_ros.kuka_action:main",
-            "csv_path = kukavarproxy_ros.csv_kuka:main",
-            "magnet_control = kukavarproxy_ros.control_policy:main",
-            'kuka_commander = kukavarproxy_ros.kuka_commander:main',
         ],
     },
 )

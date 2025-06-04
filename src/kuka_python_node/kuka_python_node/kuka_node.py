@@ -37,8 +37,8 @@ class kuka_python(Node):
     def get_position(self):
         try:
             transform = self.tf_buffer.lookup_transform(
-                "base_link",  # target frame
-                "tool",       # source frame
+                "kuka_base",  # target frame
+                "kuka_tool",       # source frame
                 rclpy.time.Time()
             )
 
