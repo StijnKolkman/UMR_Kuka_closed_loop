@@ -235,7 +235,6 @@ class ClosedLoopRecorder:
         # Update the focus on camera1
         focus_value = float(val)
         self.cap1.set(cv2.CAP_PROP_FOCUS, focus_value)
-
         if hasattr(self, 'focus_value_label1'):  # Ensure the label exists before updating
             self.focus_value_label1.config(text=f"Focus Camera 1 Value: {focus_value:.2f}")
 
@@ -248,7 +247,7 @@ class ClosedLoopRecorder:
 
     def toggle_controller(self):
         self.controller_boolean = not self.controller_boolean
-        state = "ON" if self.controller_boolean else "OFF"
+        #state = "ON" if self.controller_boolean else "OFF"
         if self.controller_boolean:
             self.controller_button.config(text=f"Controller: ON", style='ControllerOn.TButton')
             self.kuka_python.set_motor_speed(self.motor_velocity_rad)
@@ -277,7 +276,7 @@ class ClosedLoopRecorder:
             self.out2 = cv2.VideoWriter(cam2_filename, cv2.VideoWriter_fourcc(*'XVID'), 30, (1920, 1080))
 
         else:
-            # Stop recording and calculate FPS
+            # Stop recording
             duration = time.time() - self.record_start_time
             fps_value = len(self.frames_cam1) / duration if duration > 0 else 30.0
             print(f"Duration: {duration:.2f}s — FPS: {fps_value:.2f}")
@@ -310,7 +309,6 @@ class ClosedLoopRecorder:
     def toggle_calibration_cam1(self):
         self.box_1_roi = self.select_roi(self.cap1)
         self.UMR_1_roi = self.select_roi(self.cap1)
-        # Now switch to the “Calibrated” style:
         self.calibration_button1.config(text="Cam 1 Calibrated", style='Calibrated.TButton')
 
     def toggle_calibration_cam2(self):
@@ -367,19 +365,6 @@ class ClosedLoopRecorder:
         # Calculate the initial Z position based on the box height and camera distance
         self.Z1_initial = self.cam1_to_box_distance + self.initial_z # Distance between object and camera1 at time=0
         self.Z2_initial = self.cam2_to_box_distance + self.initial_y
-        
-        #print("bottom_box_cam1:", bottom_box_cam1)
-        #print("umr_1_center_y:", self.umr_1_center_y)
-
-        #print("bottom_box_cam2:", bottom_box_cam2)
-        #print("umr_2_center_y:", self.umr_2_center_y)
-
-        #print("Z1_initial:", self.Z1_initial)
-        #print("Z2_initial:", self.Z2_initial)
-        #print("cam1_to_box_distance:", self.cam1_to_box_distance)
-        #print("initial_z:", self.initial_z)
-        #print("cam2_to_box_distance:", self.cam2_to_box_distance)
-        #print("initial_y:", self.initial_y)
 
         self.Z1.append(self.Z1_initial)  # Initial depth for camera 1
         self.Z2.append(self.Z2_initial)
@@ -406,7 +391,7 @@ class ClosedLoopRecorder:
 
         self.ax3d.clear()
 
-        #3D trajectory data
+        #3D trajectory data to mm
         X = (np.array(self.X_3d))*1000
         Y = (np.array(self.Y_3d))*1000
         Z = (np.array(self.Z_3d))*1000 
@@ -419,7 +404,6 @@ class ClosedLoopRecorder:
             self.ax3d.plot(X, Y, Z, color='blue', linewidth=4, label='Trajectory')
         
         if hasattr(self, 'trajectory_3d'):
-            # trajectory_3d[:,0:3] are x_mm,y_mm,z_mm
             planned = np.array(self.trajectory_3d)
             planned_X = planned[:, 0]
             planned_Y = planned[:, 1]
@@ -443,7 +427,7 @@ class ClosedLoopRecorder:
             [0, h, d]
         ])
 
-        # List of edges (pairs of corner indices)
+        # List of edge
         edges = [
             (0,1), (1,2), (2,3), (3,0),   # bottom face
             (4,5), (5,6), (6,7), (7,4),   # top face
@@ -478,11 +462,15 @@ class ClosedLoopRecorder:
         self.ax3d.legend()
         self.canvas.draw()
 
+    def camera_to_box_distance(self,L_real_mm, L_pixels, focal_length_px):
+        L_real_m = L_real_mm / 1000.0
+        D_camera_box =(focal_length_px * L_real_m) / L_pixels
+        return D_camera_box
+
     def send_pose(self,pos,rot):
         """
         Publish the pose to the ROS topic. pos, rot should be in meter and radians
         """
-
         if pos is not None and rot is not None:
             #first convert to mm and degrees
             pos_mm = pos*1000
@@ -515,7 +503,7 @@ class ClosedLoopRecorder:
         undistorted_point_cam2 = cv2.undistortPoints(point_cam2, self.camera_matrix2, self.dist_coeffs2, P=self.camera_matrix2)
         self.UMR_2_center_x, self.UMR_2_center_y = undistorted_point_cam2[0,0]
 
-        # Calculate position relative to focal point
+        # Calculate position relative to focal point using pinhole model 
         X_3d_relative = (self.UMR_1_center_x - self.cx_cam1)*self.Z1[-1]/self.fx_cam1
         Y_3d_relative = ((self.UMR_1_center_y - self.cy_cam1)*self.Z1[-1]/self.fy_cam1)
         Z_3d_relative = ((self.UMR_2_center_y - self.cy_cam2)*self.Z2[-1]/self.fy_cam2)
@@ -529,109 +517,16 @@ class ClosedLoopRecorder:
         self.X_3d.append(X_3d_next)
         self.Y_3d.append(Y_3d_next)
         self.Z_3d.append(Z_3d_next)
-        # Adjust future depth estimates based on movement in Y and Z,
 
+        # Adjust future depth estimates based on movement in Y and Z,
         # This is assuming smooth motion and small displacements
         Z1_next = self.cam1_to_box_distance+Z_3d_next
         Z2_next = self.cam2_to_box_distance+Y_3d_next
         self.Z1.append(Z1_next)
         self.Z2.append(Z2_next)
-        #print(f"Z1={Z1_next:.4f} m, Z2={Z2_next:.4f} m")
-
-        # Make the first position 0,0,0
-        #X_3d -= X_3d[0]
-        #Y_3d -= Y_3d[0]
-        #Z_3d -= Z_3d[0]
-
-    def update_frame(self):
-        
-        # Check if the window is still open before updating
-        if not self.window.winfo_exists():
-            return
-        
-        #Read the frames
-        # Read 30 frames ahead (skip 30 frames)
-        for _ in range(30):
-            ret1, frame1 = self.cap1.read()  # Read but discard 30 frames from camera 1
-            ret2, frame2 = self.cap2.read()  # Read but discard 30 frames from camera 2
-
-        ret1, frame1 = self.cap1.read()
-        ret2, frame2 = self.cap2.read()
-
-        #self.i = 0.001 #this is in meter
-        #pos, rot = self.get_current_pose()  # both should be np.array([x, y, z]) and np.array([a, b, c])
-        #pos_new = pos + np.array([self.i, 0, 0])
-        #self.send_pose(pos_new,rot)
-
-
-        if self.recording and ret1 and ret2:
-            # Save frames
-            self.frames_cam1.append(frame1.copy())
-            self.frames_cam2.append(frame2.copy())
-            self.out1.write(frame1)
-            self.out2.write(frame2)
-            timestamp = time.time() - self.record_start_time
-            self.timestamps.append(timestamp)
-
-        if ret1:
-            # Update the GUI with the frame --> first the frame is resized to fit in the GUI
-            frame1_display = frame1.copy()
-            if self.UMR_1_roi is not None:
-                x, y, w, h = [int(v) for v in self.box_1_roi]
-                cv2.rectangle(frame1_display, (x,y), (x+w,y+h), (255,0,0), 4)
-                # Update the tracker 
-                self.UMR_1_bounding_box, self.UMR_1_roi,self.UMR_1_angle_measured, self.UMR_1_center_x, self.UMR_1_center_y = self.update_roi_center(frame1, self.UMR_1_roi)
-                x, y, w, h = [int(v) for v in self.UMR_1_roi]
-                #cv2.rectangle(frame1_display, (x,y), (x+w,y+h), (0,0,255), 4) #This can draw the ROI around the umr, but it is not needed
-                # Draw the bounding box around the umr 
-                cv2.drawContours(frame1_display, [self.UMR_1_bounding_box + (x, y)], 0, (0, 0, 255), 2)
-
-            frame1_resized = cv2.resize(frame1_display, (576, 324), interpolation=cv2.INTER_LINEAR)    
-            frame_rgb1 = cv2.cvtColor(frame1_resized, cv2.COLOR_BGR2RGB)
-            img1 = ImageTk.PhotoImage(Image.fromarray(frame_rgb1))
-            self.video_label1.imgtk = img1
-            self.video_label1.config(image=img1)
-
-
-        if ret2:
-            # Update the GUI with the frame --> first the frame is resized to fit in the GUI 
-            frame2_display = frame2.copy()
-            if self.UMR_2_roi is not None:
-                x, y, w, h = [int(v) for v in self.box_2_roi]
-                cv2.rectangle(frame2_display, (x,y), (x+w,y+h), (255,0,0), 4)
-                # Update the tracker 
-                self.UMR_2_bounding_box,self.UMR_2_roi,self.UMR_2_angle_measured, self.UMR_2_center_x, self.UMR_2_center_y = self.update_roi_center(frame2, self.UMR_2_roi)
-                x, y, w, h = [int(v) for v in self.UMR_2_roi]
-                #cv2.rectangle(frame2_display, (x,y), (x+w,y+h), (0,0,255), 4) #This can draw the ROI around the umr, but it is not needed
-                # Draw the bounding box around the umr
-                cv2.drawContours(frame2_display, [self.UMR_2_bounding_box + (x, y)], 0, (0, 0, 255), 2)    
-            frame2_resized = cv2.resize(frame2_display, (576, 324), interpolation=cv2.INTER_LINEAR)    
-            frame_rgb2 = cv2.cvtColor(frame2_resized, cv2.COLOR_BGR2RGB)
-            img2 = ImageTk.PhotoImage(Image.fromarray(frame_rgb2))
-            self.video_label2.imgtk = img2
-            self.video_label2.config(image=img2)
-
-        # Update the reconstructed pose and angle based on the UMRs and box positions
-        if self.reconstruction_boolean is True:
-            self.update_trajectory()
-
-            if len(self.X_3d) % 5 == 0:  # only redraw every 5th frame
-                self.update_trajectory_plot()
-            self.angle_1, self.angle_2 = self.angle_filter(self.UMR_1_angle_measured, self.UMR_2_angle_measured)
-            self.angle1_label.config(text=f"Angle 1: {self.angle_1:.2f}°")
-            self.angle2_label.config(text=f"Angle 2: {self.angle_2:.2f}°")
-
-        # Update the controller
-        if self.controller_boolean is True:
-            if self.reconstruction_boolean is False:
-                print("First turn the reconstructor on")
-                return
-            self.trajectory_tracking_control()
-
-        self.window.after(10, self.update_frame)        
+        #print(f"Z1={Z1_next:.4f} m, Z2={Z2_next:.4f} m")       
 
     def select_roi(self,cap):
-
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         ret, frame = cap.read()
         if not ret:
@@ -734,12 +629,8 @@ class ClosedLoopRecorder:
 
             return box, roi, angle, center_x_, center_y_
 
-    def camera_to_box_distance(self,L_real_mm, L_pixels, focal_length_px):
-        L_real_m = L_real_mm / 1000.0
-        D_camera_box =(focal_length_px * L_real_m) / L_pixels
-        return D_camera_box
-
     def angle_filter(self, angle_1_measured, angle_2_measured):
+        #exponential moving average filter for angles
         if self.angle_1_filtered is None or self.angle_2_filtered is None:
             self.angle_1_filtered = angle_1_measured
             self.angle_2_filtered = angle_2_measured
@@ -757,7 +648,7 @@ class ClosedLoopRecorder:
         index = np.argmin(distances)
         return index
 
-    def trajectory_tracking_control(self):
+    def controller(self):
         if self.trajectory_3d is None or len(self.trajectory_3d) == 0:
             return
 
@@ -798,7 +689,6 @@ class ClosedLoopRecorder:
         return 
 
     def calibrate_kuka(self):
-        #get the starting position of the kuka
         self.kuka_start_pos,self.kuka_start_rot = self.get_current_pose()
         self.calibrate_kuka_button.config(text="Kuka Calibrated",style='CalibrateKukaDone.TButton')
 
@@ -818,7 +708,6 @@ class ClosedLoopRecorder:
         print(f"motor velocity is set to: {hz_velocity} Hz")
 
     def compute_initial_world_xyz(self):
-
         u = self.umr_1_center_x
         v = self.umr_1_center_y
         Z1 = self.Z1_initial  # camera1 → object distance (m)
@@ -831,8 +720,6 @@ class ClosedLoopRecorder:
         Y0 = -(Y_rel - self.Y_shift)
 
         # Compute Z relative to the box plane (i.e. how far above the box)
-        #   If the box plane sits at distance = cam1_to_box_distance,
-        #   then the object’s depth above the box plane is:
         Z0 = self.Z1_initial - self.cam1_to_box_distance
 
         return X0, Y0, Z0
@@ -878,14 +765,6 @@ class ClosedLoopRecorder:
         if not turn_left:
             sweep_rad = -sweep_rad
 
-        #Compute the center of the circle in the world frame (mm)
-        #    Given starting pose (X0, Y0) and heading psi0, a left turn
-        #    center is located at:
-        #       Xc = X0 - R * sin(psi0)
-        #       Yc = Y0 + R * cos(psi0)
-        #    For a right turn, the sign flips:
-        #       Xc = X0 + R * sin(psi0)
-        #       Yc = Y0 - R * cos(psi0)
         if turn_left:
             Xc = X0 - radius_mm * math.sin(psi0)
             Yc = Y0 + radius_mm * math.cos(psi0)
@@ -893,22 +772,12 @@ class ClosedLoopRecorder:
             Xc = X0 + radius_mm * math.sin(psi0)
             Yc = Y0 - radius_mm * math.cos(psi0)
 
-        # 5) Sample 'phi' from 0 to sweep_rad in num_points steps
         phi = np.linspace(0, sweep_rad, num_points)
 
-        # 6) For each phi_i, the world‐frame coordinates are:
-        #    Xi = Xc + R * sin(psi0 + phi_i)   (if left), or
-        #         Xc - R * sin(psi0 + phi_i)   (if right)
-        #    Yi = Yc - R * cos(psi0 + phi_i)   (left), or
-        #         Yc + R * cos(psi0 + phi_i)   (right)
-        #    But actually the “+/-” sign is handled by sweep_rad’s sign above.
-        #    A unified formula (with sweep_rad signed) is:
         Xs = Xc + radius_mm * np.sin(psi0 + phi)
         Ys = Yc - radius_mm * np.cos(psi0 + phi)
 
-        # 7) Tangent heading at each waypoint = psi0 + phi + (±90°)
-        #    For a left turn, tangent = psi0 + phi + 90°  (π/2 rad)
-        #    For a right turn, tangent = psi0 + phi - 90° (-π/2 rad)
+        #Tangent heading at each waypoint = psi0 + phi + (±90°)
         if turn_left:
             theta_rad = psi0 + phi + (math.pi / 2)
         else:
@@ -917,12 +786,91 @@ class ClosedLoopRecorder:
         # Convert to degrees, wrap into [0,360)
         theta_deg = (np.degrees(theta_rad)) % 360
 
-        # 8) Z stays fixed at Z0 for all points
+        # Z stays fixed at Z0 for all points
         Zs = np.full(num_points, Z0, dtype=np.float64)
-
-        # 9) Stack into (num_points × 4): [x_mm, y_mm, z_mm, θ_deg]
         trajectory_3d = np.vstack((Xs, Ys, Zs, theta_deg)).T
         return trajectory_3d
+    
+    def update_frame(self):
+        
+        # Check if the window is still open before updating
+        if not self.window.winfo_exists():
+            return
+        
+        #Read the frames
+        # Read 30 frames ahead (skip 30 frames)
+        for _ in range(30):
+            ret1, frame1 = self.cap1.read()  # Read but discard 30 frames from camera 1
+            ret2, frame2 = self.cap2.read()  # Read but discard 30 frames from camera 2
+
+        ret1, frame1 = self.cap1.read()
+        ret2, frame2 = self.cap2.read()
+
+        if self.recording and ret1 and ret2:
+            # Save frames
+            self.frames_cam1.append(frame1.copy())
+            self.frames_cam2.append(frame2.copy())
+            self.out1.write(frame1)
+            self.out2.write(frame2)
+            timestamp = time.time() - self.record_start_time
+            self.timestamps.append(timestamp)
+
+        if ret1:
+            # Update the GUI with the frame --> first the frame is resized to fit in the GUI
+            frame1_display = frame1.copy()
+            if self.UMR_1_roi is not None:
+                x, y, w, h = [int(v) for v in self.box_1_roi]
+                cv2.rectangle(frame1_display, (x,y), (x+w,y+h), (255,0,0), 4)
+                # Update the tracker 
+                self.UMR_1_bounding_box, self.UMR_1_roi,self.UMR_1_angle_measured, self.UMR_1_center_x, self.UMR_1_center_y = self.update_roi_center(frame1, self.UMR_1_roi)
+                x, y, w, h = [int(v) for v in self.UMR_1_roi]
+                #cv2.rectangle(frame1_display, (x,y), (x+w,y+h), (0,0,255), 4) #This can draw the ROI around the umr, but it is not needed
+                # Draw the bounding box around the umr 
+                cv2.drawContours(frame1_display, [self.UMR_1_bounding_box + (x, y)], 0, (0, 0, 255), 2)
+
+            frame1_resized = cv2.resize(frame1_display, (576, 324), interpolation=cv2.INTER_LINEAR)    
+            frame_rgb1 = cv2.cvtColor(frame1_resized, cv2.COLOR_BGR2RGB)
+            img1 = ImageTk.PhotoImage(Image.fromarray(frame_rgb1))
+            self.video_label1.imgtk = img1
+            self.video_label1.config(image=img1)
+
+
+        if ret2:
+            # Update the GUI with the frame --> first the frame is resized to fit in the GUI 
+            frame2_display = frame2.copy()
+            if self.UMR_2_roi is not None:
+                x, y, w, h = [int(v) for v in self.box_2_roi]
+                cv2.rectangle(frame2_display, (x,y), (x+w,y+h), (255,0,0), 4)
+                # Update the tracker 
+                self.UMR_2_bounding_box,self.UMR_2_roi,self.UMR_2_angle_measured, self.UMR_2_center_x, self.UMR_2_center_y = self.update_roi_center(frame2, self.UMR_2_roi)
+                x, y, w, h = [int(v) for v in self.UMR_2_roi]
+                #cv2.rectangle(frame2_display, (x,y), (x+w,y+h), (0,0,255), 4) #This can draw the ROI around the umr, but it is not needed
+                # Draw the bounding box around the umr
+                cv2.drawContours(frame2_display, [self.UMR_2_bounding_box + (x, y)], 0, (0, 0, 255), 2)    
+            frame2_resized = cv2.resize(frame2_display, (576, 324), interpolation=cv2.INTER_LINEAR)    
+            frame_rgb2 = cv2.cvtColor(frame2_resized, cv2.COLOR_BGR2RGB)
+            img2 = ImageTk.PhotoImage(Image.fromarray(frame_rgb2))
+            self.video_label2.imgtk = img2
+            self.video_label2.config(image=img2)
+
+        # Update the reconstructed pose and angle based on the UMRs and box positions
+        if self.reconstruction_boolean is True:
+            self.update_trajectory()
+            if len(self.X_3d) % 5 == 0:  # only redraw every 5th frame
+                self.update_trajectory_plot()
+
+            self.angle_1, self.angle_2 = self.angle_filter(self.UMR_1_angle_measured, self.UMR_2_angle_measured)
+            self.angle1_label.config(text=f"Angle 1: {self.angle_1:.2f}°")
+            self.angle2_label.config(text=f"Angle 2: {self.angle_2:.2f}°")
+
+        # Update the controller
+        if self.controller_boolean is True:
+            if self.reconstruction_boolean is False:
+                print("First turn the reconstructor on")
+                return
+            self.controller()
+
+        self.window.after(10, self.update_frame)
 
     def on_closing(self):
         if self.recording:
@@ -933,21 +881,13 @@ class ClosedLoopRecorder:
         self.window.destroy()
         self.kuka_python.shutdown_publisher()
 
-    # def delta_change(self):
-
-    #     if change >1mm
-    #     send.pose()
-
+    #def delta_change(self):
+        #if change >1mm
+        #     send.pose()
         # --> eerste boven hangen  en op vaste hoek houden
 
 # Used if the recorder class is called seperately
 if __name__ == "__main__":
     root = tk.Tk()
     app = ClosedLoopRecorder(root)
-    root.mainloop()
-
-    
-
-    #TODO fix the angle calculation for the UMR's
-    #TODO: klaarmaken voor live video door verwijderen: select_roi:verplaats naar eerste frame 
-    #TODO: finish the closed loop controller and update the self.pose there 
+    root.mainloop() 
