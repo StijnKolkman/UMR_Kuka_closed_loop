@@ -946,8 +946,12 @@ if __name__ == "__main__":
     app = ClosedLoopRecorder(root)
     root.mainloop()
 
-    
+
 
     #TODO fix the angle calculation for the UMR's
     #TODO: klaarmaken voor live video door verwijderen: select_roi:verplaats naar eerste frame 
     #TODO: finish the closed loop controller and update the self.pose there 
+    #TODO: door rechtdoor gaan de feedback tunen
+    #TODO: feedforward bepalen door bachten maken 
+    #TODO: en dan combinerne
+    #TODO: kijken of ik pitch kan controleren ook
