@@ -5,7 +5,7 @@ kuka_python = start_kuka_node()
 
 #sending a pose
 sending_pose = (0.0,0.0,0.0,0.0,0.0,0.0) #(x,y,x,a,b,c) in mm and degrees
-kuka_python.publish_pose(sending_pose) #Publish the pose to the ROS topic. pos, rot should be in meter and radians
+kuka_python.publish_pose(sending_pose) #Publish the pose to the ROS topic.
 
 #get the current pose
 kuka_incoming_pose = kuka_python.get_position() #get the current pose of the kuka in m and radians
