@@ -1,6 +1,4 @@
-import rlcpy
 from kuka_python_node.kuka_node import start_kuka_node
-
 
 #setup
 kuka_python = start_kuka_node()
