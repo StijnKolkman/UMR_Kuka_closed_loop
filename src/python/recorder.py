@@ -935,4 +935,3 @@ if __name__ == "__main__":
     #TODO: feedforward bepalen door bochten maken 
     #TODO: en dan combinerne
     #TODO: kijken of ik pitch kan controleren ook
-    #TODO: als controller uit, dan blijft die publishen?????
