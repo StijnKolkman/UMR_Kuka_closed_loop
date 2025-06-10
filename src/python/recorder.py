@@ -26,12 +26,13 @@ class ClosedLoopRecorder:
         # ----------------------------
 
         #Box to Kuka rotation matrix
-
         self.R_BoxToKuka = np.array([
                 [ 0, -1,  0],
                 [-1,  0,  0],
                 [ 0,  0, -1]
             ])
+        # Small pitch to compensate the moving upwards
+        self.pitch_compensation = -10
 
         # Filtered angles
         self.angle_1_filtered = None
@@ -668,18 +669,16 @@ class ClosedLoopRecorder:
         # Update the position of the kuka
         current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
         start_pos = np.array([self.X_3d[0],self.Y_3d[0],self.Z_3d[0]])
-
         delta_pos = current_pos-start_pos
-        #delta_pos = self.R_BoxToKuka @ delta_pos
-        #print(delta_pos)
 
         # Update the orientation of the kuka
         current_angle = np.radians(self.angle_1)
-        delta_rot = np.array([0,current_angle,0])
+        delta_rot = np.array([self.pitch_compensation,current_angle,0]) #here i also apply a small pitch down to compensate for the moving upwards of the umr
 
-                #rotate the rot and pos
+        #rotate the rot and pos
         delta_pos, delta_rot = self.transform_pose(delta_pos, delta_rot)
 
+        #apply to calibrated start position
         kuka_new_pos = self.kuka_start_pos + delta_pos
         kuka_new_rot = self.kuka_start_rot+delta_rot
 
