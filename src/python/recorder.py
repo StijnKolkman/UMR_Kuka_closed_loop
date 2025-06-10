@@ -13,6 +13,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from scipy.spatial.transform import Rotation as R
 
 from kuka_python_node.kuka_node import start_kuka_node
 
@@ -23,6 +24,14 @@ class ClosedLoopRecorder:
         # ----------------------------
         # 1) Initialize state & ROS node
         # ----------------------------
+
+        #Box to Kuka rotation matrix
+
+        self.R_BoxToKuka = np.array([
+                [ 0, -1,  0],
+                [-1,  0,  0],
+                [ 0,  0, -1]
+            ])
 
         # Filtered angles
         self.angle_1_filtered = None
@@ -454,7 +463,9 @@ class ClosedLoopRecorder:
 
         self.ax3d.set_xlim(mid_x - max_range, mid_x + max_range)
         self.ax3d.set_ylim(mid_y - max_range, mid_y + max_range)
-        self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
+        #self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
+        self.ax3d.set_zlim(mid_z + max_range, mid_z - max_range)  # Flip Z
+
 
         #self.ax3d.view_init(elev=90, azim=270) #--> view cam 1
         #self.ax3d.view_init(elev=30, azim=250) 
@@ -475,8 +486,10 @@ class ClosedLoopRecorder:
             #first convert to mm and degrees
             pos_mm = pos*1000
             rot_deg = np.degrees(rot)
+            print(pos_mm)
+            print(rot_deg)
             
-            pose = np.concatenate((pos_mm,rot_deg)) 
+            pose = np.concatenate((pos_mm, rot_deg))
             self.kuka_python.publish_pose(pose)
             print(f"Published pose: {pose}")
         else:
@@ -510,7 +523,7 @@ class ClosedLoopRecorder:
 
         # The 3d trajectory data shifted to the origin point and in mm
         X_3d_next = (X_3d_relative-self.X_shift)
-        Y_3d_next = -(Y_3d_relative-self.Y_shift)
+        Y_3d_next = (-Y_3d_relative+self.Y_shift)
         Z_3d_next = -(Z_3d_relative-self.Z_shift)
 
         # Append the new 3D coordinates to the lists
@@ -657,11 +670,17 @@ class ClosedLoopRecorder:
         start_pos = np.array([self.X_3d[0],self.Y_3d[0],self.Z_3d[0]])
 
         delta_pos = current_pos-start_pos
-        kuka_new_pos = self.kuka_start_pos + delta_pos
+        #delta_pos = self.R_BoxToKuka @ delta_pos
+        #print(delta_pos)
 
         # Update the orientation of the kuka
         current_angle = np.radians(self.angle_1)
-        delta_rot = np.array([current_angle,0,0])
+        delta_rot = np.array([0,current_angle,0])
+
+                #rotate the rot and pos
+        delta_pos, delta_rot = self.transform_pose(delta_pos, delta_rot)
+
+        kuka_new_pos = self.kuka_start_pos + delta_pos
         kuka_new_rot = self.kuka_start_rot+delta_rot
 
         #send the new position and rotation
@@ -872,6 +891,22 @@ class ClosedLoopRecorder:
 
         self.window.after(10, self.update_frame)
 
+    def transform_pose(self, old_pos, old_rot):
+
+        # Transform position
+        new_pos = self.R_BoxToKuka @ np.array(old_pos)
+
+        # Convert original Euler angles to rotation matrix
+        rot_matrix = R.from_euler('xyz', old_rot).as_matrix()
+
+        # Transform rotation matrix: R_new = T * R_old * T.T
+        rot_transformed = self.R_BoxToKuka @ rot_matrix @ self.R_BoxToKuka.T
+
+        # Convert back to Euler angles
+        new_rot = R.from_matrix(rot_transformed).as_euler('xyz')
+
+        return new_pos, new_rot
+
     def on_closing(self):
         if self.recording:
             self.out1.release()
@@ -896,8 +931,8 @@ if __name__ == "__main__":
 
     #TODO fix the angle calculation for the UMR's
     #TODO: klaarmaken voor live video door verwijderen: select_roi:verplaats naar eerste frame 
-    #TODO: finish the closed loop controller and update the self.pose there 
     #TODO: door rechtdoor gaan de feedback tunen
-    #TODO: feedforward bepalen door bachten maken 
+    #TODO: feedforward bepalen door bochten maken 
     #TODO: en dan combinerne
     #TODO: kijken of ik pitch kan controleren ook
+    #TODO: als controller uit, dan blijft die publishen?????

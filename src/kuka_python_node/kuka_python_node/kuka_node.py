@@ -19,7 +19,7 @@ class kuka_python(Node):
         self.publisher_target_position = self.create_publisher(KukaPos, 'python/target_position', 1)
         self.publish_action = self.create_publisher(KukaAction, "kuka/action", 10)
         #self.position_sub = self.create_subscription(PoseStamped, "kuka/pose", self.read_position, 10)
-        self.publisher_motor_velocity = self.create_publisher(Float32, 'kuka/command_velocity', 1)
+        self.publisher_motor_velocity = self.create_publisher(Float32, 'maxon/target_velocity', 1)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer,self)
