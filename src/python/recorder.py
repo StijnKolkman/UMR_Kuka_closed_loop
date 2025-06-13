@@ -8,6 +8,7 @@ import os
 import csv
 import math
 import rclpy
+import pandas as pd
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
@@ -32,12 +33,19 @@ class ClosedLoopRecorder:
                 [ 0,  0, -1]
             ])
         # Small pitch to compensate the moving upwards
-        self.pitch_compensation = -10
+        self.pitch_compensation = np.radians(-10)
+
+        # new send positions
+        self.kuka_new_pos = None
+        self.kuka_new_rot = None
+
+        # reference trajectory
+        self.trajectory_3d = None
 
         # Filtered angles
         self.angle_1_filtered = None
         self.angle_2_filtered = None
-        self.alpha = 0.2
+        self.alpha = 0.05
         self.i = 0
 
         # Controller state
@@ -59,6 +67,9 @@ class ClosedLoopRecorder:
         self.kuka_start_pos = None
         self.kuka_start_rot = None
         self.reconstruction_boolean = False
+        self.X_3d = None
+        self.Y_3d = None
+        self.Z_3d = None
 
         # Known box dimensions (mm)
         self.real_box_width_cam1_mm = 108
@@ -114,11 +125,19 @@ class ClosedLoopRecorder:
         # ----------------------------
         # 3) Open video captures
         # ----------------------------
-        # If using actual cameras: cv2.VideoCapture(0), cv2.VideoCapture(1)
-        self.cap1 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam1.avi")
-        self.cap2 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam2.avi")
+        # If using actual cameras: 
+        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        #self.cap1 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam1.avi")
+        #self.cap2 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam2.avi")
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+
+        self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
+        self.cap1.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)  # Set height
+
+        self.cap2.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
+        self.cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)  # Set height
 
         # ----------------------------
         # 4) Set up main frames
@@ -188,7 +207,10 @@ class ClosedLoopRecorder:
         self.trajectory_reconstructor.grid(row=3, column=0, sticky="ew", pady=2)
 
         self.recorded_files_label = ttk.Label(self.cal_frame, text="", foreground="blue")
-        self.recorded_files_label.grid(row=4, column=0, sticky="w", pady=(4,0))
+        self.recorded_files_label.grid(row=5, column=0, sticky="w", pady=(4,0))
+
+        self.reset_angle = ttk.Button(self.cal_frame, text="Set angles to initial position", command=self.reset_all_angles)
+        self.reset_angle.grid(row=4, column=0, sticky="ew", pady=2)
 
         # 7.3 Controller group
         self.ctrl_frame = ttk.Labelframe(self.controls_frame, text="Controller", labelanchor="n", padding=(10,8))
@@ -235,7 +257,7 @@ class ClosedLoopRecorder:
         self.frames_cam1 = []
         self.frames_cam2 = []
         self.record_start_time = None
-        self.timestamps = []
+        self.timestamps = None
 
         # Start the update loop and handle window‐close
         self.update_frame()
@@ -258,6 +280,10 @@ class ClosedLoopRecorder:
     def toggle_controller(self):
         self.controller_boolean = not self.controller_boolean
         #state = "ON" if self.controller_boolean else "OFF"
+        if self.trajectory_3d is None or self.reconstruction_boolean is False:
+            messagebox.showerror("Error", "First start the 3D reconstructor and make sure a reference trajectory is made")
+            return
+
         if self.controller_boolean:
             self.controller_button.config(text=f"Controller: ON", style='ControllerOn.TButton')
             self.kuka_python.set_motor_speed(self.motor_velocity_rad)
@@ -271,8 +297,8 @@ class ClosedLoopRecorder:
         output_dir = os.path.join(os.getcwd(), filename)
         os.makedirs(output_dir, exist_ok=True)
 
-        cam1_filename = os.path.join(output_dir, f"{filename}_cam1.avi")
-        cam2_filename = os.path.join(output_dir, f"{filename}_cam2.avi")
+        cam1_filename = os.path.join(output_dir, f"{filename}_cam1.mp4")
+        cam2_filename = os.path.join(output_dir, f"{filename}_cam2.mp4")
 
         if self.recording:
             # Create video writer
@@ -282,8 +308,14 @@ class ClosedLoopRecorder:
             self.recorded_files_label.config(text="Recording in progress...")
             print(f"Started recording: {cam1_filename} & {cam2_filename}")
             self.record_button.configure(text="Stop recording", style='RecordingOn.TButton')
-            self.out1 = cv2.VideoWriter(cam1_filename, cv2.VideoWriter_fourcc(*'XVID'), 30, (1920, 1080))
-            self.out2 = cv2.VideoWriter(cam2_filename, cv2.VideoWriter_fourcc(*'XVID'), 30, (1920, 1080))
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            self.out1 = cv2.VideoWriter(cam1_filename, fourcc, 20,(1280, 720))
+            self.out2 = cv2.VideoWriter(cam2_filename, fourcc, 20, (1280, 720))#(1920, 1080))
+
+
+            if not self.out1.isOpened() or not self.out2.isOpened():
+                print(f"Error: VideoWriter for {cam1_filename} or {cam2_filename} failed to open")
+                return
 
         else:
             # Stop recording
@@ -303,18 +335,27 @@ class ClosedLoopRecorder:
             self.recorded_file_names = (cam1_filename, cam2_filename)  # Store filenames
             self.record_button.configure(text="Start recording", style='RecordingOff.TButton')
 
-            # Save timestamps to CSV
-            timestamp_filename = os.path.join(output_dir, f"{filename}_timestamps.csv")
-            with open(timestamp_filename, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Frame", "Timestamp (s)"])
-                for i, ts in enumerate(self.timestamps):
-                    writer.writerow([i, ts])
+            # Generate the output file name based on the input file name
+            #output_file_name = os.path.basename(self.csv_file_cam1)
+            output_file_path = os.path.join(output_dir, f"{filename}_trajectory.csv")
 
-            print(f"[INFO] Timestamps saved to {timestamp_filename}")
+            if self.X_3d is None or self.timestamps is None:
+                messagebox.showerror("Error", "No trajectory to save, only saved a recording")
+                return
+            elif len(self.timestamps) == len(self.X_3d) == len(self.Y_3d) == len(self.Z_3d):
+                self.points_with_timestamp = pd.DataFrame({
+                    'Time': self.timestamps,
+                    'X': self.X_3d,
+                    'Y': self.Y_3d,
+                    'Z': self.Z_3d
+                })
+                self.points_with_timestamp.to_csv(output_file_path, index=False)
+                print(f"[INFO] Timestamps saved to {output_file_path}")
+            else:
+                print("[ERROR] Mismatch in data lengths. Cannot save CSV.")
 
             # Initiate timestamps array for next recording
-            self.timestamps = []
+            self.timestamps = None
 
     def toggle_calibration_cam1(self):
         self.box_1_roi = self.select_roi(self.cap1)
@@ -326,7 +367,20 @@ class ClosedLoopRecorder:
         self.UMR_2_roi = self.select_roi(self.cap2)
         self.calibration_button2.config(text="Cam 2 Calibrated", style='Calibrated.TButton')
 
+    def reset_all_angles(self):
+        if self.kuka_start_rot is None or self.kuka_new_pos is None or self.kuka_new_pos is None:
+            messagebox.showerror("Reset Error", "No starting angle defined, first calibrate the KUKA!")
+            return
+        else: 
+            self.kuka_new_rot = self.kuka_start_rot
+            self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
+
     def start_trajectory_reconstruction(self):
+
+        if self.box_1_roi is None or self.box_2_roi is None or self.UMR_1_roi is None or self.UMR_2_roi is None:
+            messagebox.showerror("Error", "Camera('s) not calibrated, first calibrate camera 1 and 2!")
+            return
+
 
         self.reconstruction_boolean = True
         
@@ -394,8 +448,8 @@ class ClosedLoopRecorder:
         self.Z_shift = (origin_box2_y_px - self.cy_cam2) * Z_box / self.fy_cam2
 
         #now make the trajectory! linear or curved
-        #self.trajectory_3d = self.generate_relative_linear_trajectory(length_mm=100,num_points=50,direction_deg=0.0)
-        self.trajectory_3d = self.generate_curved_trajectory_3d(radius_mm=100,arc_angle_deg=90.0,num_points=50,direction_deg=0.0,turn_left=True)
+        self.trajectory_3d = self.generate_relative_linear_trajectory_3d(length_mm=100,num_points=50,direction_deg=0.0)
+        #self.trajectory_3d = self.generate_curved_trajectory_3d(radius_mm=100,arc_angle_deg=90.0,num_points=50,direction_deg=0.0,turn_left=True)
 
     def update_trajectory_plot(self):
 
@@ -541,7 +595,7 @@ class ClosedLoopRecorder:
         #print(f"Z1={Z1_next:.4f} m, Z2={Z2_next:.4f} m")       
 
     def select_roi(self,cap):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        #cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         ret, frame = cap.read()
         if not ret:
             print("Cannot read from the video.")
@@ -656,7 +710,7 @@ class ClosedLoopRecorder:
         return self.angle_1_filtered, self.angle_2_filtered
 
     def find_nearest_trajectory_point(self, current_x, current_y):
-        trajectory_xy = self.trajectory[:, :2]
+        trajectory_xy = self.trajectory_3d[:, :2]
         current_pos = np.array([current_x, current_y])
         distances = np.linalg.norm(trajectory_xy - current_pos, axis=1)
         index = np.argmin(distances)
@@ -671,19 +725,29 @@ class ClosedLoopRecorder:
         start_pos = np.array([self.X_3d[0],self.Y_3d[0],self.Z_3d[0]])
         delta_pos = current_pos-start_pos
 
+        
+        index_nearest_reference_point = self.find_nearest_trajectory_point(self.X_3d[-1],self.Y_3d[-1])
+        X_nearest_ref, y_nearest_ref = self.trajectory_3d[index_nearest_reference_point, :2]
+        error_y = self.Y_3d[-1]-y_nearest_ref
+        if error_y > 0:
+            offset_angle = 50
+        else: 
+            offset_angle = -50
+
         # Update the orientation of the kuka
-        current_angle = np.radians(self.angle_1)
-        delta_rot = np.array([self.pitch_compensation,current_angle,0]) #here i also apply a small pitch down to compensate for the moving upwards of the umr
+        #offset_angle = -50
+        current_angle = np.radians(self.angle_1)+np.radians(offset_angle)
+        delta_rot = np.array([self.pitch_compensation, current_angle,0]) #here i also apply a small pitch down to compensate for the moving upwards of the umr
 
         #rotate the rot and pos
         delta_pos, delta_rot = self.transform_pose(delta_pos, delta_rot)
 
         #apply to calibrated start position
-        kuka_new_pos = self.kuka_start_pos + delta_pos
-        kuka_new_rot = self.kuka_start_rot+delta_rot
+        self.kuka_new_pos = self.kuka_start_pos + delta_pos
+        self.kuka_new_rot = self.kuka_start_rot+delta_rot
 
         #send the new position and rotation
-        self.send_pose(kuka_new_pos,kuka_new_rot)
+        self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
 
         # # Find nearest trajectory point
         # idx = self.find_nearest_trajectory_point(current_x, current_y)
@@ -722,7 +786,7 @@ class ClosedLoopRecorder:
             return
 
         rad_per_sec_velocity = hz_velocity * 2 * math.pi  # Convert Hz to rad/s
-        self.motor_velocity_rad = rad_per_sec_velocity
+        self.motor_velocity_rad = -rad_per_sec_velocity #minus used since forward is different in my robot case
         print(f"motor velocity is set to: {hz_velocity} Hz")
 
     def compute_initial_world_xyz(self):
@@ -742,7 +806,7 @@ class ClosedLoopRecorder:
 
         return X0, Y0, Z0
 
-    def generate_relative_linear_trajectory(self,length_mm=100,num_points=50,direction_deg=0.0):
+    def generate_relative_linear_trajectory_3d(self,length_mm=100,num_points=50,direction_deg=0.0):
 
         #get initial world‐XYZ (in meters), then convert to millimeters
         X0_m, Y0_m, Z0_m = self.compute_initial_world_xyz()
@@ -817,9 +881,9 @@ class ClosedLoopRecorder:
         
         #Read the frames
         # Read 30 frames ahead (skip 30 frames)
-        for _ in range(30):
-            ret1, frame1 = self.cap1.read()  # Read but discard 30 frames from camera 1
-            ret2, frame2 = self.cap2.read()  # Read but discard 30 frames from camera 2
+        #for _ in range(30):
+        #    ret1, frame1 = self.cap1.read()  # Read but discard 30 frames from camera 1
+        #    ret2, frame2 = self.cap2.read()  # Read but discard 30 frames from camera 2
 
         ret1, frame1 = self.cap1.read()
         ret2, frame2 = self.cap2.read()
@@ -832,7 +896,10 @@ class ClosedLoopRecorder:
             self.out2.write(frame2)
             timestamp = time.time() - self.record_start_time
             self.timestamps.append(timestamp)
-
+            print("Writing frame to video")
+            if frame1 is None:
+                print("frame is none")
+            
         if ret1:
             # Update the GUI with the frame --> first the frame is resized to fit in the GUI
             frame1_display = frame1.copy()
@@ -902,7 +969,7 @@ class ClosedLoopRecorder:
         rot_transformed = self.R_BoxToKuka @ rot_matrix @ self.R_BoxToKuka.T
 
         # Convert back to Euler angles
-        new_rot = R.from_matrix(rot_transformed).as_euler('xyz')
+        new_rot = -R.from_matrix(rot_transformed).as_euler('xyz') #I think the rotations go in the wrong direction, thats why a minus was added (no clue where goes wrong. Maybe my angle definition in the cameras is wrong)
 
         return new_pos, new_rot
 
@@ -928,10 +995,20 @@ if __name__ == "__main__":
 
 
 
-    #TODO fix the angle calculation for the UMR's
-    #TODO: klaarmaken voor live video door verwijderen: select_roi:verplaats naar eerste frame 
-    #TODO: door rechtdoor gaan de feedback tunen
-    #TODO: feedforward bepalen door bochten maken 
-    #TODO: en dan combinerne
-    #TODO: kijken of ik pitch kan controleren ook
-    #TODO: als controller uit, dan blijft die publishen?????
+"""
+Plan van aanpak: 
+- bepalen feedforward door bochten te maken met umr-rpm offset van -70 tot +70
+- feedforward combineren met feedback
+- feedback tunen aan de hand van rechtdoorgaan eerst, dan curved en gekke paths enzo
+"""
+
+    #TODO: pitch control --> if hij kijkt teveeel naar onder dan pitch draaien #
+    #TODO: Z in trajectory fixen, gaat naar onder???
+    #TODO: betere angle filter, zit teveel jitter in
+    #TODO: zijn er nog meer edge cases? kan ik nu ook meerdere opnames achterelkaar doen? 
+
+
+    #TODO: test angle reset knop
+    #TODO: kijken of turning angle klopt
+    #TODO: check saving trajectory to csv
+    #TODO: test new alpha
