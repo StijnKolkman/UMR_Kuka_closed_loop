@@ -460,6 +460,7 @@ class ClosedLoopRecorder:
         #now make the trajectory! linear or curved
         self.trajectory_3d = self.generate_relative_linear_trajectory_3d(length_mm=100,num_points=50,direction_deg=0.0)
         #self.trajectory_3d = self.generate_curved_trajectory_3d(radius_mm=100,arc_angle_deg=90.0,num_points=50,direction_deg=0.0,turn_left=True)
+        self.save_trajectory_to_csv(self.trajectory_3d)
 
     def update_trajectory_plot(self):
 
@@ -883,6 +884,27 @@ class ClosedLoopRecorder:
         Zs = np.full(num_points, Z0, dtype=np.float64)
         trajectory_3d = np.vstack((Xs, Ys, Zs, theta_deg)).T
         return trajectory_3d
+
+    def save_trajectory_to_csv(self, trajectory_3d):
+        # Validate trajectory shape
+        if not isinstance(trajectory_3d, np.ndarray) or trajectory_3d.ndim != 2 or trajectory_3d.shape[1] != 4:
+            raise ValueError(f"Invalid trajectory shape: expected (N, 4), got {trajectory_3d.shape}")
+
+        filename = self.filename_entry.get().strip() or "recording"
+        output_dir = os.path.join(os.getcwd(), filename)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Define the output file path
+        output_file_path = os.path.join(output_dir, f"{filename}_reference_trajectory.csv")
+
+        # Save trajectory to CSV
+        header = ['x_mm', 'y_mm', 'z_mm', 'theta_deg']
+        with open(output_file_path, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(header)
+            writer.writerows(trajectory_3d)
+
+        print(f"Trajectory saved to: {output_file_path}")
     
     def update_frame(self):
         
@@ -1016,7 +1038,6 @@ Plan van aanpak:
     #TODO: Z in trajectory fixen, gaat naar onder???
     #TODO: zijn er nog meer edge cases? 
     #TODO: GAUSSIAN BLUR IN DE TRACKER
-
-    #TODO: kijken of turning angle klopt
+    
     #TODO: een keer een recording plotten in matlab
-    #TODO: ook gelijk reference opslaan
+    #TODO: testen opslaan reference
