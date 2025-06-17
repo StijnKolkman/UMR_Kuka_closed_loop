@@ -33,7 +33,7 @@ class ClosedLoopRecorder:
                 [ 0,  0, -1]
             ])
         # Small pitch to compensate the moving upwards
-        self.pitch_compensation = np.radians(-10)
+        self.pitch_compensation = np.radians(0)
 
         # new send positions
         self.kuka_new_pos = None
@@ -126,8 +126,8 @@ class ClosedLoopRecorder:
         # 3) Open video captures
         # ----------------------------
         # If using actual cameras: 
-        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
         #self.cap1 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam1.avi")
         #self.cap2 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam2.avi")
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
@@ -257,7 +257,11 @@ class ClosedLoopRecorder:
         self.frames_cam1 = []
         self.frames_cam2 = []
         self.record_start_time = None
-        self.timestamps = None
+        self.timestamps = []
+        self.X_3d_recording = []
+        self.Y_3d_recording = []
+        self.Z_3d_recording = []
+
 
         # Start the update loop and handle window‐close
         self.update_frame()
@@ -292,6 +296,10 @@ class ClosedLoopRecorder:
             self.kuka_python.set_motor_speed(0.0)
 
     def toggle_recording(self):
+        if self.reconstruction_boolean is False:
+            messagebox.showerror("Error","First start the reconstruction to record the trajectory")
+            return 
+
         self.recording = not self.recording
         filename = self.filename_entry.get().strip() or "recording"
         output_dir = os.path.join(os.getcwd(), filename)
@@ -339,23 +347,25 @@ class ClosedLoopRecorder:
             #output_file_name = os.path.basename(self.csv_file_cam1)
             output_file_path = os.path.join(output_dir, f"{filename}_trajectory.csv")
 
-            if self.X_3d is None or self.timestamps is None:
+            if self.X_3d is None or not self.timestamps:
                 messagebox.showerror("Error", "No trajectory to save, only saved a recording")
                 return
-            elif len(self.timestamps) == len(self.X_3d) == len(self.Y_3d) == len(self.Z_3d):
+            elif len(self.timestamps) == len(self.X_3d_recording) and len(self.X_3d_recording) == len(self.Y_3d_recording) and len(self.Y_3d_recording) == len(self.Z_3d_recording):
                 self.points_with_timestamp = pd.DataFrame({
                     'Time': self.timestamps,
-                    'X': self.X_3d,
-                    'Y': self.Y_3d,
-                    'Z': self.Z_3d
+                    'X': self.X_3d_recording,
+                    'Y': self.Y_3d_recording,
+                    'Z': self.Z_3d_recording
                 })
                 self.points_with_timestamp.to_csv(output_file_path, index=False)
                 print(f"[INFO] Timestamps saved to {output_file_path}")
             else:
                 print("[ERROR] Mismatch in data lengths. Cannot save CSV.")
+                print(len(self.X_3d_recording))
+                print(len(self.timestamps))
 
             # Initiate timestamps array for next recording
-            self.timestamps = None
+            self.timestamps = []
 
     def toggle_calibration_cam1(self):
         self.box_1_roi = self.select_roi(self.cap1)
@@ -541,12 +551,12 @@ class ClosedLoopRecorder:
             #first convert to mm and degrees
             pos_mm = pos*1000
             rot_deg = np.degrees(rot)
-            print(pos_mm)
-            print(rot_deg)
+            #print(pos_mm)
+            #print(rot_deg)
             
             pose = np.concatenate((pos_mm, rot_deg))
             self.kuka_python.publish_pose(pose)
-            print(f"Published pose: {pose}")
+            #print(f"Published pose: {pose}")
         else:
             print("No pose to publish.")
  
@@ -555,7 +565,7 @@ class ClosedLoopRecorder:
         get the current pose of the kuka in m and radians
         """
         kuka_pose = self.kuka_python.get_position()
-        print(f"kuka pose: {kuka_pose}")
+        #print(f"kuka pose: {kuka_pose}")
         pos = np.array(kuka_pose[0:3], dtype=float)
         rot = np.array(kuka_pose[3:6], dtype=float)
         return pos, rot
@@ -729,10 +739,11 @@ class ClosedLoopRecorder:
         index_nearest_reference_point = self.find_nearest_trajectory_point(self.X_3d[-1],self.Y_3d[-1])
         X_nearest_ref, y_nearest_ref = self.trajectory_3d[index_nearest_reference_point, :2]
         error_y = self.Y_3d[-1]-y_nearest_ref
+        print(error_y)
         if error_y > 0:
-            offset_angle = 50
+            offset_angle = -30
         else: 
-            offset_angle = -50
+            offset_angle = 30
 
         # Update the orientation of the kuka
         #offset_angle = -50
@@ -888,7 +899,7 @@ class ClosedLoopRecorder:
         ret1, frame1 = self.cap1.read()
         ret2, frame2 = self.cap2.read()
 
-        if self.recording and ret1 and ret2:
+        if self.recording and ret1 and ret2: 
             # Save frames
             self.frames_cam1.append(frame1.copy())
             self.frames_cam2.append(frame2.copy())
@@ -896,6 +907,9 @@ class ClosedLoopRecorder:
             self.out2.write(frame2)
             timestamp = time.time() - self.record_start_time
             self.timestamps.append(timestamp)
+            self.X_3d_recording.append(self.X_3d[-1])
+            self.Y_3d_recording.append(self.Y_3d[-1])
+            self.Z_3d_recording.append(self.Z_3d[-1])
             print("Writing frame to video")
             if frame1 is None:
                 print("frame is none")
@@ -982,11 +996,6 @@ class ClosedLoopRecorder:
         self.window.destroy()
         self.kuka_python.shutdown_publisher()
 
-    #def delta_change(self):
-        #if change >1mm
-        #     send.pose()
-        # --> eerste boven hangen  en op vaste hoek houden
-
 # Used if the recorder class is called seperately
 if __name__ == "__main__":
     root = tk.Tk()
@@ -1000,15 +1009,14 @@ Plan van aanpak:
 - bepalen feedforward door bochten te maken met umr-rpm offset van -70 tot +70
 - feedforward combineren met feedback
 - feedback tunen aan de hand van rechtdoorgaan eerst, dan curved en gekke paths enzo
+- doen op 0.2 hz
 """
 
     #TODO: pitch control --> if hij kijkt teveeel naar onder dan pitch draaien #
     #TODO: Z in trajectory fixen, gaat naar onder???
-    #TODO: betere angle filter, zit teveel jitter in
-    #TODO: zijn er nog meer edge cases? kan ik nu ook meerdere opnames achterelkaar doen? 
+    #TODO: zijn er nog meer edge cases? 
+    #TODO: GAUSSIAN BLUR IN DE TRACKER
 
-
-    #TODO: test angle reset knop
     #TODO: kijken of turning angle klopt
-    #TODO: check saving trajectory to csv
-    #TODO: test new alpha
+    #TODO: een keer een recording plotten in matlab
+    #TODO: ook gelijk reference opslaan

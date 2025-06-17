@@ -45,7 +45,7 @@ class KukaCommander(Node):
 
         # Callback to receive new target pose
         self.newest_position = (msg.x, msg.y, msg.z, msg.a, msg.b, msg.c)
-        self.get_logger().info(f'Received new target pose: {self.newest_position}')
+        #self.get_logger().info(f'Received new target pose: {self.newest_position}')
 
     def publish_joint_move(self, msg):
         if not msg.data:
@@ -59,14 +59,14 @@ class KukaCommander(Node):
         target = KRLPos("COM_E6POS")
         target.set_all(x, y, z, a, b, c)
         target_pos.value = target.get_KRL_string()
-        self.get_logger().info(f"Target position set to: {target_pos.value}")
+        #self.get_logger().info(f"Target position set to: {target_pos.value}")
 
         # Create the action message to send to the KUKA
         action = KukaAction()
         action.com_action = 15  # Move to position
         action.variable = [target_pos]
         self.kuka_action_pub.publish(action)
-        self.get_logger().info("Published joint move command.")
+        #self.get_logger().info("Published joint move command.")
         
 def main(args=None):
     rclpy.init(args=args)
