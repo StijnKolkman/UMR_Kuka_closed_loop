@@ -22,10 +22,6 @@ class ClosedLoopRecorder:
     def __init__(self, window):
         self.kuka_python = start_kuka_node()
 
-        # ----------------------------
-        # 1) Initialize state & ROS node
-        # ----------------------------
-
         #Box to Kuka rotation matrix
         self.R_BoxToKuka = np.array([
                 [ 0, -1,  0],
@@ -76,6 +72,17 @@ class ClosedLoopRecorder:
         self.real_box_height_cam1_mm = 56
         self.real_box_width_cam2_mm = 108
         self.real_box_height_cam2_mm = 32
+        
+        # recording states 
+        self.recording = False
+        self.recorded_file_names = None
+        self.frames_cam1 = []
+        self.frames_cam2 = []
+        self.record_start_time = None
+        self.timestamps = []
+        self.X_3d_recording = []
+        self.Y_3d_recording = []
+        self.Z_3d_recording = []
 
         # Camera calibration parameters
         self.camera_matrix1 = np.array([
@@ -91,13 +98,13 @@ class ClosedLoopRecorder:
         ], dtype=np.float64)
         self.dist_coeffs2 = np.array([0.1216, -0.1727, 0, 0, 0], dtype=np.float64)
 
-        # ----------------------------
-        # 2) Configure main window
-        # ----------------------------
+        # ALL THE GUI RELATED SETTINGS
         self.window = window
         self.window.title("Dual Camera Recorder")
         self.window.geometry("1024x700")
         self.window.minsize(800, 600)
+        self.window.grid_columnconfigure((0,1,2), weight=1)
+        self.window.grid_rowconfigure(0, weight=1)
 
         # Use a simple ttk theme for consistency
         style = ttk.Style(self.window)
@@ -118,30 +125,18 @@ class ClosedLoopRecorder:
         style.configure('RecordingOff.TButton', background='red', foreground='white')
         style.configure('RecordingOn.TButton',  background='gray', foreground='white')
 
-        # Make columns 0,1,2 expand equally; row 0 expands vertically
-        self.window.grid_columnconfigure((0,1,2), weight=1)
-        self.window.grid_rowconfigure(0, weight=1)
-
-        # ----------------------------
-        # 3) Open video captures
-        # ----------------------------
-        # If using actual cameras: 
-        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
+        # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam1.avi")
         #self.cap2 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam2.avi")
+        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
         self.cap1.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)  # Set height
-
         self.cap2.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
         self.cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)  # Set height
 
-        # ----------------------------
-        # 4) Set up main frames
-        # ----------------------------
         # Left: Camera 1 preview; Middle: Camera 2 preview; Right: 3D plot
         self.cam1_frame = ttk.Frame(self.window, borderwidth=2, relief="sunken")
         self.cam2_frame = ttk.Frame(self.window, borderwidth=2, relief="sunken")
@@ -156,17 +151,12 @@ class ClosedLoopRecorder:
         # Make controls_frame’s columns 0,1,2 expand equally
         self.controls_frame.grid_columnconfigure((0,1,2), weight=1)
 
-        # ----------------------------
-        # 5) Camera preview labels
-        # ----------------------------
         self.video_label1 = ttk.Label(self.cam1_frame)
         self.video_label1.pack(fill="both", expand=True)
         self.video_label2 = ttk.Label(self.cam2_frame)
         self.video_label2.pack(fill="both", expand=True)
 
-        # ----------------------------
-        # 6) Matplotlib 3D plot + toolbar
-        # ----------------------------
+        #Matplotlib 3D plot + toolbar
         self.fig = plt.Figure(figsize=(6, 5))
         self.ax3d = self.fig.add_subplot(111, projection='3d')
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
@@ -174,10 +164,8 @@ class ClosedLoopRecorder:
         toolbar = NavigationToolbar2Tk(self.canvas, self.plot_frame)
         toolbar.update()
 
-        # ----------------------------
-        # 7) Build sub-panels in controls_frame
-        # ----------------------------
-        # 7.1 Recording group
+        # Build sub-panels in controls_frame
+        # Recording group
         self.rec_frame = ttk.Labelframe(self.controls_frame, text="Recording", labelanchor="n", padding=(10,8))
         self.rec_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.rec_frame.grid_columnconfigure(1, weight=1)
@@ -189,7 +177,7 @@ class ClosedLoopRecorder:
         self.record_button = ttk.Button(self.rec_frame, text="Start Recording", command=self.toggle_recording)
         self.record_button.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4,0))
 
-        # 7.2 Calibration group
+        # Calibration group
         self.cal_frame = ttk.Labelframe(self.controls_frame, text="Calibration", labelanchor="n", padding=(10,8))
         self.cal_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         self.cal_frame.grid_columnconfigure(0, weight=1)
@@ -198,10 +186,8 @@ class ClosedLoopRecorder:
         self.calibration_button1.grid(row=0, column=0, sticky="ew", pady=2)
         self.calibration_button2 = ttk.Button(self.cal_frame, text="Calibrate Cam 2", command=self.toggle_calibration_cam2,style='ControllerOff.TButton')
         self.calibration_button2.grid(row=1, column=0, sticky="ew", pady=2)
-
         self.calibrate_kuka_button = ttk.Button(self.cal_frame, text="Calibrate Kuka",command=self.calibrate_kuka,style='CalibrateKuka.TButton')
         self.calibrate_kuka_button.grid(row=2, column=0, sticky="ew", pady=4)
-
 
         self.trajectory_reconstructor = ttk.Button(self.cal_frame, text="Start 3D Reconstruction", command=self.start_trajectory_reconstruction)
         self.trajectory_reconstructor.grid(row=3, column=0, sticky="ew", pady=2)
@@ -234,7 +220,6 @@ class ClosedLoopRecorder:
         self.angle2_label = ttk.Label(self.ctrl_frame, text="Angle 2: ---°")
         self.angle2_label.grid(row=3, column=1, sticky="w", padx=5, pady=(6,0))
 
-        # Focus sliders (beneath controller group for compactness)
         # Cam 1 focus
         self.focus_label1 = ttk.Label(self.ctrl_frame, text="Focus Cam 1:")
         self.focus_label1.grid(row=4, column=0, sticky="w", padx=5, pady=(6,0))
@@ -248,20 +233,6 @@ class ClosedLoopRecorder:
         self.focus_slider2 = ttk.Scale(self.ctrl_frame, from_=0, to=255, orient='horizontal', command=self.set_focus2)
         self.focus_slider2.set(91)
         self.focus_slider2.grid(row=5, column=1, columnspan=2, sticky="ew", padx=5, pady=(4,0))
-
-        # ----------------------------
-        # 8) Recording variables & start loop
-        # ----------------------------
-        self.recording = False
-        self.recorded_file_names = None
-        self.frames_cam1 = []
-        self.frames_cam2 = []
-        self.record_start_time = None
-        self.timestamps = []
-        self.X_3d_recording = []
-        self.Y_3d_recording = []
-        self.Z_3d_recording = []
-
 
         # Start the update loop and handle window‐close
         self.update_frame()

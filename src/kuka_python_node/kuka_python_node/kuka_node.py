@@ -16,24 +16,18 @@ from tf2_ros.transform_listener import TransformListener
 class kuka_python(Node):
     def __init__(self):
         super().__init__('kuka_standalone_publisher')
+
+        #publishers
         self.publisher_target_position = self.create_publisher(KukaPos, 'python/target_position', 1)
         self.publish_action = self.create_publisher(KukaAction, "kuka/action", 10)
-        #self.position_sub = self.create_subscription(PoseStamped, "kuka/pose", self.read_position, 10)
         self.publisher_motor_velocity = self.create_publisher(Float32, 'maxon/target_velocity', 1)
 
+        # Subscribers
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer,self)
 
-        self.x = self.y = self.z = 0.0  # Init default position
-        self.a = self.b = self.c = 0.0
+        # Initialize kuka_pose with zeros
         self.kuka_pose = np.zeros(6)
-
-    #def send_action(self, com_action: int, variable_list: list(KukaWriteVariable)):
-    #    action = KukaAction()
-    #    action.com_action = com_action
-    #    action.variables = variable_list
-    #    self.publish_action.publish(action)
-    #    return
 
     def get_position(self):
         try:
@@ -57,31 +51,8 @@ class kuka_python(Node):
             self.get_logger().warn(f"TF lookup failed: {str(e)}")
             return self.kuka_pose
 
-    # def read_position(self, msg):
-    #     self.get_logger().info(f"i read a new position")
-    #     pose = msg.pose
-    #     self.x = pose.position.x
-    #     self.y = pose.position.y
-    #     self.z = pose.position.z
-
-    #     qx = pose.orientation.x
-    #     qy = pose.orientation.y
-    #     qz = pose.orientation.z
-    #     qw = pose.orientation.w
-
-    #     # Quaternion → Euler (roll, pitch, yaw) in radians
-    #     r = R.from_quat([qx, qy, qz, qw])
-    #     self.a, self.b, self.c = r.as_euler('xyz', degrees=False)
-
-    #     # Maak de gecombineerde tuple (x, y, z, a, b, c)
-    #     self.kuka_pose = (self.x, self.y, self.z, self.a, self.b, self.c)
-
-    #def read_position(self)
-    #t = 
-
     def publish_pose(self, pose):
         msg = KukaPos()
-        # Assign tuple values to message fields
         msg.x, msg.y, msg.z, msg.a, msg.b, msg.c = pose
         self.publisher_target_position.publish(msg)
         self.get_logger().info(f"Publishing KukaPos: {pose}")
@@ -93,9 +64,7 @@ class kuka_python(Node):
         self.get_logger().info(f"Published velocity command: {msg.data}")
 
     def shutdown_publisher(self) -> None:
-        """
-        Clean up ROS 2 node and context. Call when completely done.
-        """
+        self.get_logger().info("Shutting down publishers...")
         self.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
@@ -109,7 +78,6 @@ def start_kuka_node():
     thread = Thread(target=rclpy.spin, args=(node,), daemon=True)
     thread.start()
     return node
-
         
 if __name__=="__main__":
     node = kuka_python()
@@ -122,3 +90,10 @@ if __name__=="__main__":
         node.get_logger().info("Shutting down node...")
     finally:
         node.shutdown_publisher()
+
+    #def send_action(self, com_action: int, variable_list: list(KukaWriteVariable)):
+    #    action = KukaAction()
+    #    action.com_action = com_action
+    #    action.variables = variable_list
+    #    self.publish_action.publish(action)
+    #    return
