@@ -48,6 +48,14 @@ class ClosedLoopRecorder:
         self.controller_boolean = False
         self.motor_velocity_rad = 0.0
 
+        self.last_time_controller = None
+        self.pitch_setpoint_gain = 49.09 # Simple linear map. 16mm error will cause a 45 degrees pitch 
+        self.integrator_pitch = 0.0
+        self.integrator_pitch_max = 0.5  # Maximum integrator value to prevent windup
+        self.integrator_pitch_min = -0.5  # Minimum integrator value to prevent windup
+        self.Kp_pitch = 0.1  # Proportional gain for pitch control
+        self.Ki_pitch = 0.1  # Integral gain for pitch control
+
         # Reconstruction / ROI state
         self.pose = None
         self.box_1_roi = None
@@ -233,6 +241,76 @@ class ClosedLoopRecorder:
         self.focus_slider2 = ttk.Scale(self.ctrl_frame, from_=0, to=255, orient='horizontal', command=self.set_focus2)
         self.focus_slider2.set(91)
         self.focus_slider2.grid(row=5, column=1, columnspan=2, sticky="ew", padx=5, pady=(4,0))
+
+        # Yaw info frame (to the left of Pitch)
+        self.yaw_info = ttk.Labelframe(self.ctrl_frame, text="Yaw Debug", padding=(6,4))
+        self.yaw_info.grid(row=6, column=0, sticky="ew", pady=(8,0), padx=(0,5))
+        self.yaw_info.grid_columnconfigure(1, weight=1)
+
+        # Row 0: current yaw
+        ttk.Label(self.yaw_info, text="Current Yaw:").grid(row=0, column=0, sticky="w")
+        self.current_yaw_label = ttk.Label(self.yaw_info, text="--- rad")
+        self.current_yaw_label.grid(row=0, column=1, sticky="w")
+
+        # Row 1: yaw setpoint (if you have one)
+        ttk.Label(self.yaw_info, text="Yaw Setpoint:").grid(row=1, column=0, sticky="w")
+        self.yaw_setpoint_label = ttk.Label(self.yaw_info, text="--- rad")
+        self.yaw_setpoint_label.grid(row=1, column=1, sticky="w")
+
+        # Row 2: yaw error
+        ttk.Label(self.yaw_info, text="Yaw Error:").grid(row=2, column=0, sticky="w")
+        self.yaw_error_label = ttk.Label(self.yaw_info, text="--- rad")
+        self.yaw_error_label.grid(row=2, column=1, sticky="w")
+
+        # Row 3: yaw P-term (if you add one later)
+        ttk.Label(self.yaw_info, text="P-term:").grid(row=3, column=0, sticky="w")
+        self.yaw_pterm_label = ttk.Label(self.yaw_info, text="---")
+        self.yaw_pterm_label.grid(row=3, column=1, sticky="w")
+
+        # Row 4: yaw I-term (optional)
+        ttk.Label(self.yaw_info, text="I-term:").grid(row=4, column=0, sticky="w")
+        self.yaw_iterm_label = ttk.Label(self.yaw_info, text="---")
+        self.yaw_iterm_label.grid(row=4, column=1, sticky="w")
+
+        # Row 5: total yaw compensation or delta_rot[1]
+        ttk.Label(self.yaw_info, text="Compensation:").grid(row=5, column=0, sticky="w")
+        self.yaw_comp_label = ttk.Label(self.yaw_info, text="---")
+        self.yaw_comp_label.grid(row=5, column=1, sticky="w")
+
+        # Pitch info frame
+        self.pitch_info = ttk.Labelframe(self.ctrl_frame, text="Pitch Debug", padding=(6,4))
+        self.pitch_info.grid(row=6, column=1, sticky="ew", pady=(8,0))
+        self.pitch_info.grid_columnconfigure(1, weight=1)
+
+        # Row 0: current pitch
+        ttk.Label(self.pitch_info, text="Current Pitch:").grid(row=0, column=0, sticky="w")
+        self.current_pitch_label = ttk.Label(self.pitch_info, text="--- rad")
+        self.current_pitch_label.grid(row=0, column=1, sticky="w")
+
+        # Row 1: pitch setpoint
+        ttk.Label(self.pitch_info, text="Pitch Setpoint:").grid(row=1, column=0, sticky="w")
+        self.pitch_setpoint_label = ttk.Label(self.pitch_info, text="--- rad")
+        self.pitch_setpoint_label.grid(row=1, column=1, sticky="w")
+
+        # Row 2: error
+        ttk.Label(self.pitch_info, text="Error:").grid(row=2, column=0, sticky="w")
+        self.pitch_error_label = ttk.Label(self.pitch_info, text="--- rad")
+        self.pitch_error_label.grid(row=2, column=1, sticky="w")
+
+        # Row 3: P‐term
+        ttk.Label(self.pitch_info, text="P-term:").grid(row=3, column=0, sticky="w")
+        self.pitch_pterm_label = ttk.Label(self.pitch_info, text="---")
+        self.pitch_pterm_label.grid(row=3, column=1, sticky="w")
+
+        # Row 4: I-term
+        ttk.Label(self.pitch_info, text="I-term:").grid(row=4, column=0, sticky="w")
+        self.pitch_iterm_label = ttk.Label(self.pitch_info, text="---")
+        self.pitch_iterm_label.grid(row=4, column=1, sticky="w")
+
+        # Row 5: total compensation
+        ttk.Label(self.pitch_info, text="Compensation:").grid(row=5, column=0, sticky="w")
+        self.pitch_comp_label = ttk.Label(self.pitch_info, text="---")
+        self.pitch_comp_label.grid(row=5, column=1, sticky="w")
 
         # Start the update loop and handle window‐close
         self.update_frame()
@@ -451,9 +529,9 @@ class ClosedLoopRecorder:
         
         if hasattr(self, 'trajectory_3d'):
             planned = np.array(self.trajectory_3d)
-            planned_X = planned[:, 0]
-            planned_Y = planned[:, 1]
-            planned_Z = planned[:, 2]
+            planned_X = planned[:, 0]*1000 
+            planned_Y = planned[:, 1]*1000 
+            planned_Z = planned[:, 2]*1000 
             self.ax3d.plot(planned_X, planned_Y, planned_Z, label="Planned",color='black',linestyle='--')
 
         # Draw 3D box (rectangular prism)
@@ -648,7 +726,7 @@ class ClosedLoopRecorder:
                 #angle = rect[2]
 
                 ellipse = cv2.fitEllipse(largest_contour) # --> probably better option to get good angle between -90 and 90
-                angle = ellipse[2]-90  # in degrees and make horizontal zero
+                angle = math.radians(ellipse[2]-math.pi/2)  # in radians and make horizontal zero
 
                 # Update the ROI center based on the object's new center
                 # Keep the original size (w, h) but adjust its position
@@ -688,7 +766,6 @@ class ClosedLoopRecorder:
 
             self.angle_1_filtered = self.alpha * angle_1_measured + (1 - self.alpha) * self.angle_1_filtered
             self.angle_2_filtered = self.alpha * angle_2_measured + (1 - self.alpha) * self.angle_2_filtered
-
         return self.angle_1_filtered, self.angle_2_filtered
 
     def find_nearest_trajectory_point(self, current_x, current_y):
@@ -698,59 +775,95 @@ class ClosedLoopRecorder:
         index = np.argmin(distances)
         return index
 
-    def controller(self):
+    def controller(self,time_controller):
         if self.trajectory_3d is None or len(self.trajectory_3d) == 0:
             return
+        
+        # update dt --> needed for the controller
+        if self.last_time_controller is None:
+            self.last_time_controller = time_controller
+            return
+        else:
+            dt = time_controller - self.last_time_controller
+            self.last_time_controller = time_controller
+
+        # THE SIMPLE BANG CONTROLLER 
+            """
+            index_nearest_reference_point = self.find_nearest_trajectory_point(self.X_3d[-1],self.Y_3d[-1])
+            X_nearest_ref, y_nearest_ref = self.trajectory_3d[index_nearest_reference_point, :2]
+            error_y = self.Y_3d[-1]-y_nearest_ref
+            print(error_y)
+            if error_y > 0:
+                offset_angle = -30
+            else: 
+                offset_angle = 30
+            """
+        
+        # PITCH CONTROLLER --> pitch is controlled by the kuka moving in front or back of the umr
+        index_nearest_reference_point = self.find_nearest_trajectory_point(self.X_3d[-1],self.Y_3d[-1])
+        X_nearest_ref, y_nearest_ref, z_nearest_ref = self.trajectory_3d[index_nearest_reference_point, :3]
+
+        dz = self.Z_3d[-1] - z_nearest_ref  # Calculate the difference in Z position 
+        pitch_setpoint = self.pitch_setpoint_gain * dz           # minus‐sign so negative error ⇒ positive (nose‐up)
+        pitch_setpoint = max(min(pitch_setpoint,  45), -45)
+        current_pitch = -self.angle_2_filtered  # Assuming angle_2 is the pitch angle
+
+        error_pitch = pitch_setpoint - current_pitch
+        pitch_compensation_pterm = self.Kp_pitch * error_pitch  # Proportional control for pitch
+
+        self.integrator_pitch += error_pitch * dt  # Update the integrator for pitch
+        if self.integrator_pitch_min is not None:
+            self.integrator_pitch = max(self.integrator_pitch_min, self.integrator_pitch)
+        if self.integrator_pitch_max is not None:
+            self.integrator_pitch = min(self.integrator_pitch_max, self.integrator_pitch)
+        pitch_compensation_iterm = self.Ki_pitch * self.integrator_pitch  # Integral control for pitch
+
+        pitch_compensation = pitch_compensation_pterm + pitch_compensation_iterm
+        delta_pos_pitch_compensation = np.array([np.cos(self.angle_1_filtered)*pitch_compensation, np.sin(self.angle_1_filtered)*pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
+
+
+        # ANGLE CONTROLLER
+        # Update the orientation of the kuka
+        offset_angle = -0
+        current_angle = self.angle_1_filtered+np.radians(offset_angle)
+        delta_rot = np.array([self.pitch_compensation, current_angle,0]) #here I also apply a small pitch down to compensate for the moving upwards of the umr
 
         # Update the position of the kuka
         current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
         start_pos = np.array([self.X_3d[0],self.Y_3d[0],self.Z_3d[0]])
-        delta_pos = current_pos-start_pos
-
-        
-        index_nearest_reference_point = self.find_nearest_trajectory_point(self.X_3d[-1],self.Y_3d[-1])
-        X_nearest_ref, y_nearest_ref = self.trajectory_3d[index_nearest_reference_point, :2]
-        error_y = self.Y_3d[-1]-y_nearest_ref
-        print(error_y)
-        if error_y > 0:
-            offset_angle = -30
-        else: 
-            offset_angle = 30
-
-        # Update the orientation of the kuka
-        #offset_angle = -50
-        current_angle = np.radians(self.angle_1)+np.radians(offset_angle)
-        delta_rot = np.array([self.pitch_compensation, current_angle,0]) #here i also apply a small pitch down to compensate for the moving upwards of the umr
+        delta_pos = current_pos-start_pos + delta_pos_pitch_compensation
 
         #rotate the rot and pos
         delta_pos, delta_rot = self.transform_pose(delta_pos, delta_rot)
 
         #apply to calibrated start position
-        self.kuka_new_pos = self.kuka_start_pos + delta_pos
+        self.kuka_new_pos = self.kuka_start_pos+delta_pos
         self.kuka_new_rot = self.kuka_start_rot+delta_rot
 
         #send the new position and rotation
         self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
 
-        # # Find nearest trajectory point
-        # idx = self.find_nearest_trajectory_point(current_x, current_y)
-        # idx = min(idx, len(self.trajectory) - 1)
+        # update the gui
+        yaw_setpoint = 0
+        error_yaw = 0
+        yaw_pterm = 0
+        yaw_iterm = 0
 
-        # target_x, target_y, target_angle = self.trajectory[idx]
 
-        # # 3. Compute control errors
-        # error_pos = np.array([target_x - current_x, target_y - current_y])
-        # #TODO here calculate needed change in angle with some law
+        self.current_yaw_label .config(text=f"{current_angle:.3f} rad")
+        self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
+        self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
+        self.yaw_pterm_label  .config(text=f"{yaw_pterm:.3f}")
+        self.yaw_iterm_label  .config(text=f"{yaw_iterm:.3f}")
+        self.yaw_comp_label   .config(text=f"{delta_rot[1]:.3f}")
 
-        # # compute control signals (simple P-controller here, tune gains)
-        # Kp_pos
-        # Kp_angle
-
-        # control_translation = Kp_pos * error_pos
-        # control_rotation = Kp_angle * error_angle
-
-        # self.pose = (current_x+self.initial_x_kuka,current_y+self.initial_y_kuka,self.initial_z_kuka,self.initial_alpha_kuka, self.initial_beta_kuka, steering_angle+self.initial_gamma_kuka)
-        # self.send_pose()
+        # === And for the pitch panel (as before) ===
+        self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
+        self.pitch_setpoint_label.config(text=f"{pitch_setpoint:.3f} rad")
+        self.pitch_error_label   .config(text=f"{error_pitch:.3f} rad")
+        self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
+        self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
+        self.pitch_comp_label    .config(text=f"{pitch_compensation:.3f}")
         return 
 
     def calibrate_kuka(self):
@@ -789,71 +902,69 @@ class ClosedLoopRecorder:
 
         return X0, Y0, Z0
 
-    def generate_relative_linear_trajectory_3d(self,length_mm=100,num_points=50,direction_deg=0.0):
+    def generate_relative_linear_trajectory_3d(self,
+            length_m=0.1,          # now in meters
+            num_points=50,
+            direction_rad=0.0      # now in radians
+        ):
+        # get initial world‐XYZ (already in meters)
+        X0, Y0, Z0 = self.compute_initial_world_xyz()
 
-        #get initial world‐XYZ (in meters), then convert to millimeters
-        X0_m, Y0_m, Z0_m = self.compute_initial_world_xyz()
-        X0 = X0_m * 1000.0
-        Y0 = Y0_m * 1000.0
-        Z0 = Z0_m * 1000.0
-
-        #compute endpoint (in mm) along XY‐direction
-        theta_rad = math.radians(direction_deg)
-        dx = length_mm * math.cos(theta_rad)
-        dy = length_mm * math.sin(theta_rad)
+        # compute endpoint along XY‐direction
+        dx = length_m * math.cos(direction_rad)
+        dy = length_m * math.sin(direction_rad)
         X1 = X0 + dx
         Y1 = Y0 + dy
 
-        # linearly interpolate X, Y; keep Z constant at Z0
+        # linearly interpolate X, Y; keep Z constant
         x_vals = np.linspace(X0, X1, num_points)
         y_vals = np.linspace(Y0, Y1, num_points)
         z_vals = np.full(num_points, Z0, dtype=np.float64)
-        theta_array = np.full(num_points, direction_deg, dtype=np.float64)
+        theta_vals = np.full(num_points, direction_rad, dtype=np.float64)
 
-        # Stack into (num_points × 4): [x_mm, y_mm, z_mm, θ_deg]
-        trajectory_3d = np.vstack((x_vals, y_vals, z_vals, theta_array)).T
-
+        # Stack into (num_points × 4): [x_m, y_m, z_m, θ_rad]
+        trajectory_3d = np.vstack((x_vals, y_vals, z_vals, theta_vals)).T
         return trajectory_3d
 
-    def generate_curved_trajectory_3d(self,radius_mm=100,arc_angle_deg=90.0,num_points=50,direction_deg=0.0,turn_left=True):
+    def generate_curved_trajectory_3d(self,
+            radius_m=0.1,             # now in meters
+            arc_angle_rad=math.pi/2,  # now in radians
+            num_points=50,
+            direction_rad=0.0,        # initial heading in radians
+            turn_left=True
+        ):
+        # initial world-XYZ in meters
+        X0, Y0, Z0 = self.compute_initial_world_xyz()
 
-        # Get initial world XYZ (in meters), convert to mm
-        X0_m, Y0_m, Z0_m = self.compute_initial_world_xyz()
-        X0 = X0_m * 1000.0
-        Y0 = Y0_m * 1000.0
-        Z0 = Z0_m * 1000.0  # height stays fixed
+        psi0 = direction_rad
+        sweep = arc_angle_rad if turn_left else -arc_angle_rad
 
-        #Convert initial heading to radians
-        psi0 = math.radians(direction_deg)
-
-        sweep_rad = math.radians(arc_angle_deg)
-        if not turn_left:
-            sweep_rad = -sweep_rad
-
+        # center of the turning circle
         if turn_left:
-            Xc = X0 - radius_mm * math.sin(psi0)
-            Yc = Y0 + radius_mm * math.cos(psi0)
+            Xc = X0 - radius_m * math.sin(psi0)
+            Yc = Y0 + radius_m * math.cos(psi0)
         else:
-            Xc = X0 + radius_mm * math.sin(psi0)
-            Yc = Y0 - radius_mm * math.cos(psi0)
+            Xc = X0 + radius_m * math.sin(psi0)
+            Yc = Y0 - radius_m * math.cos(psi0)
 
-        phi = np.linspace(0, sweep_rad, num_points)
+        phi = np.linspace(0, sweep, num_points)
 
-        Xs = Xc + radius_mm * np.sin(psi0 + phi)
-        Ys = Yc - radius_mm * np.cos(psi0 + phi)
+        Xs = Xc + radius_m * np.sin(psi0 + phi)
+        Ys = Yc - radius_m * np.cos(psi0 + phi)
 
-        #Tangent heading at each waypoint = psi0 + phi + (±90°)
+        # tangent heading at each waypoint
         if turn_left:
-            theta_rad = psi0 + phi + (math.pi / 2)
+            theta = psi0 + phi + (math.pi / 2)
         else:
-            theta_rad = psi0 + phi - (math.pi / 2)
+            theta = psi0 + phi - (math.pi / 2)
 
-        # Convert to degrees, wrap into [0,360)
-        theta_deg = (np.degrees(theta_rad)) % 360
+        # wrap into [0, 2π)
+        theta = theta % (2 * math.pi)
 
-        # Z stays fixed at Z0 for all points
         Zs = np.full(num_points, Z0, dtype=np.float64)
-        trajectory_3d = np.vstack((Xs, Ys, Zs, theta_deg)).T
+
+        # Stack into (num_points × 4): [x_m, y_m, z_m, θ_rad]
+        trajectory_3d = np.vstack((Xs, Ys, Zs, theta)).T
         return trajectory_3d
 
     def save_trajectory_to_csv(self, trajectory_3d):
@@ -952,15 +1063,16 @@ class ClosedLoopRecorder:
                 self.update_trajectory_plot()
 
             self.angle_1, self.angle_2 = self.angle_filter(self.UMR_1_angle_measured, self.UMR_2_angle_measured)
-            self.angle1_label.config(text=f"Angle 1: {self.angle_1:.2f}°")
-            self.angle2_label.config(text=f"Angle 2: {self.angle_2:.2f}°")
+            self.angle1_label.config(text=f"Angle 1: {math.degrees(self.angle_1):.2f}°")
+            self.angle2_label.config(text=f"Angle 2: {math.degrees(self.angle_2):.2f}°")
 
         # Update the controller
         if self.controller_boolean is True:
             if self.reconstruction_boolean is False:
                 print("First turn the reconstructor on")
                 return
-            self.controller()
+            time_controller = time.perf_counter()
+            self.controller(time_controller)
 
         self.window.after(10, self.update_frame)
 
@@ -1012,3 +1124,5 @@ Plan van aanpak:
     
     #TODO: een keer een recording plotten in matlab
     #TODO: testen opslaan reference
+    #TODO: kijken hoe constant dt is
+    #TODO: pitch logica checken
