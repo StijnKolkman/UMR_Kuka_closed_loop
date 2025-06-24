@@ -803,10 +803,10 @@ class ClosedLoopRecorder:
         
         # PITCH CONTROLLER --> pitch is controlled by the kuka moving in front or back of the umr
         index_nearest_reference_point = self.find_nearest_trajectory_point(self.X_3d[-1],self.Y_3d[-1])
-        X_nearest_ref, y_nearest_ref, z_nearest_ref = self.trajectory_3d[index_nearest_reference_point, :3]
+        z_nearest_ref = self.trajectory_3d[index_nearest_reference_point, 3]
 
         dz = self.Z_3d[-1] - z_nearest_ref  # Calculate the difference in Z position 
-        pitch_setpoint = self.pitch_setpoint_gain * dz           # minus‐sign so negative error ⇒ positive (nose‐up)
+        pitch_setpoint = self.pitch_setpoint_gain * dz # minus‐sign so negative error ⇒ positive (nose‐up)
         pitch_setpoint = max(min(pitch_setpoint,  45), -45)
         current_pitch = -self.angle_2_filtered  # Assuming angle_2 is the pitch angle
 
