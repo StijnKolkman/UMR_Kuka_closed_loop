@@ -53,8 +53,10 @@ class ClosedLoopRecorder:
         self.integrator_pitch = 0.0
         self.integrator_pitch_max = 0.5  # Maximum integrator value to prevent windup
         self.integrator_pitch_min = -0.5  # Minimum integrator value to prevent windup
-        self.Kp_pitch = 0.1  # Proportional gain for pitch control
-        self.Ki_pitch = 0.1  # Integral gain for pitch control
+        self.Kp_pitch = 0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
+        self.Ki_pitch = 0.002  # Integral gain for pitch control. i just made it small
+        self.pitch_compensation_min = -5
+        self.pitch_compensation_max = +5
 
         # Reconstruction / ROI state
         self.pose = None
@@ -819,6 +821,7 @@ class ClosedLoopRecorder:
         pitch_compensation_iterm = self.Ki_pitch * self.integrator_pitch  # Integral control for pitch
 
         pitch_compensation = pitch_compensation_pterm + pitch_compensation_iterm
+        pitch_compensation= max(self.pitch_compensation_min, min(pitch_compensation, self.pitch_compensation_max))
         delta_pos_pitch_compensation = np.array([np.cos(self.angle_1_filtered)*pitch_compensation, np.sin(self.angle_1_filtered)*pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
 
 
