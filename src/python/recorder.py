@@ -579,9 +579,9 @@ class ClosedLoopRecorder:
         mid_z = d / 2.0
 
         self.ax3d.set_xlim(mid_x - max_range, mid_x + max_range)
-        self.ax3d.set_ylim(mid_y - max_range, mid_y + max_range)
-        #self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
-        self.ax3d.set_zlim(mid_z + max_range, mid_z - max_range)  # Flip Z
+        self.ax3d.set_ylim(mid_y + max_range, mid_y - max_range)
+        self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
+        #self.ax3d.set_zlim(mid_z + max_range, mid_z - max_range)  # Flip Z
 
 
         #self.ax3d.view_init(elev=90, azim=270) #--> view cam 1
