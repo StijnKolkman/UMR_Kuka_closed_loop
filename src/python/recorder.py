@@ -54,7 +54,7 @@ class ClosedLoopRecorder:
         self.integrator_pitch_max = 0.5  # Maximum integrator value to prevent windup
         self.integrator_pitch_min = -0.5  # Minimum integrator value to prevent windup
         self.Kp_pitch = 0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
-        self.Ki_pitch = 0.002  # Integral gain for pitch control. i just made it small
+        self.Ki_pitch = 0.01  # Integral gain for pitch control. i just made it small
         self.pitch_compensation_min = -5
         self.pitch_compensation_max = +5
 
@@ -76,6 +76,7 @@ class ClosedLoopRecorder:
         self.X_3d = None
         self.Y_3d = None
         self.Z_3d = None
+        self.N_frames = 0
 
         # Known box dimensions (mm)
         self.real_box_width_cam1_mm = 108
@@ -138,8 +139,8 @@ class ClosedLoopRecorder:
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam1.avi")
         #self.cap2 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam2.avi")
-        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -361,8 +362,7 @@ class ClosedLoopRecorder:
 
         if self.recording:
             # Create video writer
-            self.frames_cam1 = []
-            self.frames_cam2 = []
+            self.N_frames = 0
             self.record_start_time = time.time()
             self.recorded_files_label.config(text="Recording in progress...")
             print(f"Started recording: {cam1_filename} & {cam2_filename}")
@@ -379,7 +379,7 @@ class ClosedLoopRecorder:
         else:
             # Stop recording
             duration = time.time() - self.record_start_time
-            fps_value = len(self.frames_cam1) / duration if duration > 0 else 30.0
+            fps_value = self.N_frames / duration if duration > 0 else 30.0
             print(f"Duration: {duration:.2f}s — FPS: {fps_value:.2f}")
 
             # Adjust the FPS value of the video writers after recording
@@ -509,8 +509,8 @@ class ClosedLoopRecorder:
         self.Z_shift = (origin_box2_y_px - self.cy_cam2) * Z_box / self.fy_cam2
 
         #now make the trajectory! linear or curved
-        self.trajectory_3d = self.generate_relative_linear_trajectory_3d(length_mm=100,num_points=50,direction_deg=0.0)
-        #self.trajectory_3d = self.generate_curved_trajectory_3d(radius_mm=100,arc_angle_deg=90.0,num_points=50,direction_deg=0.0,turn_left=True)
+        self.trajectory_3d = self.generate_relative_linear_trajectory_3d(length_m=0.1,num_points=50,direction_rad=0.0)
+        #self.trajectory_3d = self.generate_curved_trajectory_3d(radius=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
         self.save_trajectory_to_csv(self.trajectory_3d)
 
     def update_trajectory_plot(self):
@@ -728,7 +728,7 @@ class ClosedLoopRecorder:
                 #angle = rect[2]
 
                 ellipse = cv2.fitEllipse(largest_contour) # --> probably better option to get good angle between -90 and 90
-                angle = math.radians(ellipse[2]-math.pi/2)  # in radians and make horizontal zero
+                angle = math.radians(ellipse[2]-90)  # in radians and make horizontal zero
 
                 # Update the ROI center based on the object's new center
                 # Keep the original size (w, h) but adjust its position
@@ -803,11 +803,11 @@ class ClosedLoopRecorder:
         
         # PITCH CONTROLLER --> pitch is controlled by the kuka moving in front or back of the umr
         index_nearest_reference_point = self.find_nearest_trajectory_point(self.X_3d[-1],self.Y_3d[-1])
-        z_nearest_ref = self.trajectory_3d[index_nearest_reference_point, 3]
+        z_nearest_ref = self.trajectory_3d[index_nearest_reference_point, 2]
 
         dz = self.Z_3d[-1] - z_nearest_ref  # Calculate the difference in Z position 
         pitch_setpoint = self.pitch_setpoint_gain * dz # minus‐sign so negative error ⇒ positive (nose‐up)
-        pitch_setpoint = max(min(pitch_setpoint,  45), -45)
+        pitch_setpoint = max(min(pitch_setpoint,  math.pi/4), -math.pi/4)
         current_pitch = -self.angle_2_filtered  # Assuming angle_2 is the pitch angle
 
         error_pitch = pitch_setpoint - current_pitch
@@ -829,11 +829,12 @@ class ClosedLoopRecorder:
         # Update the orientation of the kuka
         offset_angle = -0
         current_angle = self.angle_1_filtered+np.radians(offset_angle)
-        delta_rot = np.array([self.pitch_compensation, current_angle,0]) #here I also apply a small pitch down to compensate for the moving upwards of the umr
+        current_angle = 0
+        delta_rot = np.array([0, current_angle,0]) #here I also apply a small pitch down to compensate for the moving upwards of the umr
 
         # Update the position of the kuka
-        current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
-        start_pos = np.array([self.X_3d[0],self.Y_3d[0],self.Z_3d[0]])
+        current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
+        start_pos = np.array([self.X_3d[0],self.Y_3d[0],-self.Z_3d[0]])
         delta_pos = current_pos-start_pos + delta_pos_pitch_compensation
 
         #rotate the rot and pos
@@ -918,6 +919,7 @@ class ClosedLoopRecorder:
         dy = length_m * math.sin(direction_rad)
         X1 = X0 + dx
         Y1 = Y0 + dy
+        Z0 = Z0 - 0.01  
 
         # linearly interpolate X, Y; keep Z constant
         x_vals = np.linspace(X0, X1, num_points)
@@ -1008,8 +1010,7 @@ class ClosedLoopRecorder:
 
         if self.recording and ret1 and ret2: 
             # Save frames
-            self.frames_cam1.append(frame1.copy())
-            self.frames_cam2.append(frame2.copy())
+            self.N_frames += 1
             self.out1.write(frame1)
             self.out2.write(frame2)
             timestamp = time.time() - self.record_start_time
@@ -1120,7 +1121,6 @@ Plan van aanpak:
 - doen op 0.2 hz
 """
 
-    #TODO: pitch control --> if hij kijkt teveeel naar onder dan pitch draaien #
     #TODO: Z in trajectory fixen, gaat naar onder???
     #TODO: zijn er nog meer edge cases? 
     #TODO: GAUSSIAN BLUR IN DE TRACKER
@@ -1129,3 +1129,6 @@ Plan van aanpak:
     #TODO: testen opslaan reference
     #TODO: kijken hoe constant dt is
     #TODO: pitch logica checken
+    #TODO:         if self.newest_position is None or any(v is None for v in self.newest_position): --> dit werkt niet want aan begin is die altijd none
+    #TODO: 19.85mm boven bakbovenkant
+    #TODO: Z FIXEN --> staat nu ook een minus bij current pose

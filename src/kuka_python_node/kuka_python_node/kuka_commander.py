@@ -33,7 +33,7 @@ class KukaCommander(Node):
             return
     
         if self.newest_position is None or any(v is None for v in self.newest_position):
-            self.get_logger().warn("Received incomplete or missing position data.")
+            #self.get_logger().warn("Received incomplete or missing position data.")
             return
         
         target_pos = KukaWriteVariable()
