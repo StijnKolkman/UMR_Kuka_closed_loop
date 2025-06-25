@@ -579,7 +579,7 @@ class ClosedLoopRecorder:
         mid_z = d / 2.0
 
         self.ax3d.set_xlim(mid_x - max_range, mid_x + max_range)
-        self.ax3d.set_ylim(mid_y + max_range, mid_y - max_range)
+        self.ax3d.set_ylim(mid_y + max_range, mid_y - max_range) #flip Y --> i am stupid and used left hand coordinate system :(
         self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
         #self.ax3d.set_zlim(mid_z + max_range, mid_z - max_range)  # Flip Z
 
@@ -1121,9 +1121,5 @@ Plan van aanpak:
 - doen op 0.2 hz
 """
     #TODO: GAUSSIAN BLUR IN DE TRACKER
-    
-    #TODO: een keer een recording plotten in matlab
-    #TODO: testen opslaan reference
-    #TODO: kijken hoe constant dt is
     #TODO: 19.85mm boven bakbovenkant
-    #TODO: Z FIXEN --> staat nu ook een minus bij current pose. (ik heb left handed, plotten is right handed, beetje onhandig, maar ja)
+    #TODO: ff checken of trajectory opslaan telkens wel goed gaat
