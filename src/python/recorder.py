@@ -137,10 +137,10 @@ class ClosedLoopRecorder:
         style.configure('RecordingOn.TButton',  background='gray', foreground='white')
 
         # ALL THE VIDEO RELATED SETTINGS
-        #self.cap1 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam1.avi")
-        #self.cap2 = cv2.VideoCapture(r"/home/dev/ros2_ws/videos/Coated_pitch1_0_4hz_v2_cam2.avi")
-        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
+        self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
+        #self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
+        #self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -1120,15 +1120,10 @@ Plan van aanpak:
 - feedback tunen aan de hand van rechtdoorgaan eerst, dan curved en gekke paths enzo
 - doen op 0.2 hz
 """
-
-    #TODO: Z in trajectory fixen, gaat naar onder???
-    #TODO: zijn er nog meer edge cases? 
     #TODO: GAUSSIAN BLUR IN DE TRACKER
     
     #TODO: een keer een recording plotten in matlab
     #TODO: testen opslaan reference
     #TODO: kijken hoe constant dt is
-    #TODO: pitch logica checken
-    #TODO:         if self.newest_position is None or any(v is None for v in self.newest_position): --> dit werkt niet want aan begin is die altijd none
     #TODO: 19.85mm boven bakbovenkant
-    #TODO: Z FIXEN --> staat nu ook een minus bij current pose
+    #TODO: Z FIXEN --> staat nu ook een minus bij current pose. (ik heb left handed, plotten is right handed, beetje onhandig, maar ja)
