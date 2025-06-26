@@ -55,7 +55,7 @@ class kuka_python(Node):
         msg = KukaPos()
         msg.x, msg.y, msg.z, msg.a, msg.b, msg.c = pose
         self.publisher_target_position.publish(msg)
-        self.get_logger().info(f"Publishing KukaPos: {pose}")
+        #self.get_logger().info(f"Publishing KukaPos: {pose}")
 
     def set_motor_speed(self,velocity):
         msg = Float32()

@@ -47,6 +47,7 @@ class ClosedLoopRecorder:
         # Controller state
         self.controller_boolean = False
         self.motor_velocity_rad = 0.0
+        self.motor_boolean = False
 
         self.last_time_controller = None
         self.pitch_setpoint_gain = 49.09 # Simple linear map. 16mm error will cause a 45 degrees pitch 
@@ -55,8 +56,8 @@ class ClosedLoopRecorder:
         self.integrator_pitch_min = -0.5  # Minimum integrator value to prevent windup
         self.Kp_pitch = 0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
         self.Ki_pitch = 0.01  # Integral gain for pitch control. i just made it small
-        self.pitch_compensation_min = -5
-        self.pitch_compensation_max = +5
+        self.pitch_compensation_min = -0.02
+        self.pitch_compensation_max = +0.02
 
         # Reconstruction / ROI state
         self.pose = None
@@ -135,12 +136,14 @@ class ClosedLoopRecorder:
         style.map('CalibrateKukaDone.TButton',background=[('active', '#005f00')],foreground=[('active', 'white')])
         style.configure('RecordingOff.TButton', background='red', foreground='white')
         style.configure('RecordingOn.TButton',  background='gray', foreground='white')
+        style.configure('MotorOff.TButton', background='red', foreground='white')
+        style.configure('MotorOn.TButton',  background='green', foreground='white')
 
         # ALL THE VIDEO RELATED SETTINGS
-        self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
-        self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        #self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
-        #self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
+        #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
+        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -224,6 +227,10 @@ class ClosedLoopRecorder:
         # Controller toggle
         self.controller_button = ttk.Button(self.ctrl_frame, text="Controller: OFF", command=self.toggle_controller,style='TButton')
         self.controller_button.grid(row=1, column=0, columnspan=3, sticky="ew", pady=2)
+
+        # Motor toggle button
+        self.motor_button = ttk.Button(self.ctrl_frame,text="Motor: OFF",command=self.toggle_motor,style='MotorOff.TButton')
+        self.motor_button.grid(row=2, column=0, columnspan=3, sticky="ew", pady=2)
 
         # Angle displays
         self.angle1_label = ttk.Label(self.ctrl_frame, text="Angle 1: ---°")
@@ -345,6 +352,16 @@ class ClosedLoopRecorder:
             self.kuka_python.set_motor_speed(self.motor_velocity_rad)
         else:
             self.controller_button.config(text=f"Controller: OFF", style='ControllerOff.TButton')
+            self.kuka_python.set_motor_speed(0.0)
+
+    def toggle_motor(self):
+        """Turn the KUKA motor on or off, independently of the controller logic."""
+        self.motor_boolean = not self.motor_boolean
+        if self.motor_boolean:
+            self.motor_button.config(text="Motor: ON",  style='MotorOn.TButton')
+            self.kuka_python.set_motor_speed(self.motor_velocity_rad)
+        else:
+            self.motor_button.config(text="Motor: OFF", style='MotorOff.TButton')
             self.kuka_python.set_motor_speed(0.0)
 
     def toggle_recording(self):
@@ -822,14 +839,13 @@ class ClosedLoopRecorder:
 
         pitch_compensation = pitch_compensation_pterm + pitch_compensation_iterm
         pitch_compensation= max(self.pitch_compensation_min, min(pitch_compensation, self.pitch_compensation_max))
-        delta_pos_pitch_compensation = np.array([np.cos(self.angle_1_filtered)*pitch_compensation, np.sin(self.angle_1_filtered)*pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
-
+        delta_pos_pitch_compensation = np.array([np.cos(-self.angle_1_filtered)*pitch_compensation, np.sin(-self.angle_1_filtered)*pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
+        print(delta_pos_pitch_compensation)
 
         # ANGLE CONTROLLER
         # Update the orientation of the kuka
-        offset_angle = -0
+        offset_angle = -40
         current_angle = self.angle_1_filtered+np.radians(offset_angle)
-        current_angle = 0
         delta_rot = np.array([0, current_angle,0]) #here I also apply a small pitch down to compensate for the moving upwards of the umr
 
         # Update the position of the kuka
@@ -919,7 +935,7 @@ class ClosedLoopRecorder:
         dy = length_m * math.sin(direction_rad)
         X1 = X0 + dx
         Y1 = Y0 + dy
-        Z0 = Z0 - 0.01  
+        Z0 = Z0 
 
         # linearly interpolate X, Y; keep Z constant
         x_vals = np.linspace(X0, X1, num_points)
@@ -1127,3 +1143,10 @@ Plan van aanpak:
     #TODO: kijken hoe constant dt is
     #TODO: 19.85mm boven bakbovenkant
     #TODO: Z FIXEN --> staat nu ook een minus bij current pose. (ik heb left handed, plotten is right handed, beetje onhandig, maar ja)
+
+
+    # THE NICE TO HAVES
+    #TODO: make a reset button that resets everything, closes recordings etc --> this should keep the current kuka_calibration
+    #TODO: make a distance above UMR button (with if distance is smaller than box high, dont do it)
+    #TODO: make a move above UMR button. to move to start position
+    #TODO: simuleren netto torque for pitching tegenover steering angle
