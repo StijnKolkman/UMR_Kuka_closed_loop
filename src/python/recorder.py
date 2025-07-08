@@ -10,6 +10,8 @@ import math
 import rclpy
 import pandas as pd
 import recorder_functions
+import datetime
+import json
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
@@ -432,6 +434,30 @@ class ClosedLoopRecorder:
                 print("[ERROR] Mismatch in data lengths. Cannot save CSV.")
                 print(len(self.X_3d_recording))
                 print(len(self.timestamps))
+
+            # Save the controller parameters to a JSON file
+            param_dump = {
+                "timestamp_iso"        : datetime.datetime.now().isoformat(timespec="seconds"),
+                "motor_velocity_rad"   : self.motor_velocity_rad,
+                "pitch_setpoint_gain"  : self.pitch_setpoint_gain,
+                "Kp_pitch"             : self.Kp_pitch,
+                "Ki_pitch"             : self.Ki_pitch,
+                "integrator_limits"    : [self.integrator_pitch_min, self.integrator_pitch_max],
+                "alpha_angle_filter"   : self.alpha,
+                "R_BoxToKuka"          : self.R_BoxToKuka.tolist(),
+                # add anything else you want to freeze here
+            }
+
+            json_path = os.path.join(output_dir, f"{filename}_controller_params.json")
+            with open(json_path, "w") as f:
+                json.dump(param_dump, f, indent=4)
+            print(f"[INFO] Controller parameters saved to {json_path}")
+
+
+
+
+
+
 
             # Initiate timestamps array for next recording
             self.timestamps = []
