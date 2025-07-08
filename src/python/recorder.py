@@ -99,6 +99,23 @@ class ClosedLoopRecorder:
         self.Y_3d_recording = []
         self.Z_3d_recording = []
 
+        # Controller recording parameters
+        self.pitch_setpoint_rec   = []
+        self.current_pitch_rec    = []
+        self.pitch_error_rec      = []
+        self.pitch_comp_rec       = []
+        self.pitch_comp_iterm_rec = []
+        self.pitch_comp_pterm_rec = []
+
+        self.current_yaw_rec      = []
+        self.yaw_setpoint_rec     = []
+        self.yaw_error_rec        = []
+        self.yaw_pterm_rec        = []
+        self.yaw_iterm_rec        = []
+        self.yaw_comp_rec         = []
+        
+
+
         # Camera calibration parameters
         self.camera_matrix1 = np.array([
             [1397.9,   0, 953.6590],
@@ -419,21 +436,40 @@ class ClosedLoopRecorder:
             output_file_path = os.path.join(output_dir, f"{filename}_trajectory.csv")
 
             if self.X_3d is None or not self.timestamps:
-                messagebox.showerror("Error", "No trajectory to save, only saved a recording")
+                messagebox.showerror("Error",
+                    "No trajectory to save, only saved the videos.")
                 return
-            elif len(self.timestamps) == len(self.X_3d_recording) and len(self.X_3d_recording) == len(self.Y_3d_recording) and len(self.Y_3d_recording) == len(self.Z_3d_recording):
-                self.points_with_timestamp = pd.DataFrame({
-                    'Time': self.timestamps,
-                    'X': self.X_3d_recording,
-                    'Y': self.Y_3d_recording,
-                    'Z': self.Z_3d_recording
-                })
-                self.points_with_timestamp.to_csv(output_file_path, index=False)
-                print(f"[INFO] Timestamps saved to {output_file_path}")
-            else:
-                print("[ERROR] Mismatch in data lengths. Cannot save CSV.")
-                print(len(self.X_3d_recording))
-                print(len(self.timestamps))
+            cols = {
+                'Time'              : self.timestamps,
+                'X'                 : self.X_3d_recording,
+                'Y'                 : self.Y_3d_recording,
+                'Z'                 : self.Z_3d_recording,
+
+                # ─ pitch channels ─
+                'pitch_setpoint'    : self.pitch_setpoint_rec,
+                'current_pitch'     : self.current_pitch_rec,
+                'pitch_error'       : self.pitch_error_rec,
+                'pitch_comp'        : self.pitch_comp_rec,
+                'pitch_comp_iterm'  : self.pitch_comp_iterm_rec,
+                'pitch_comp_pterm'  : self.pitch_comp_pterm_rec,
+
+                # ─ yaw channels ─
+                'current_yaw'       : self.current_yaw_rec,
+                'yaw_setpoint'      : self.yaw_setpoint_rec,
+                'yaw_error'         : self.yaw_error_rec,
+                'yaw_pterm'         : self.yaw_pterm_rec,
+                'yaw_iterm'         : self.yaw_iterm_rec,
+                'yaw_comp'          : self.yaw_comp_rec,
+            }
+            target = len(self.timestamps)
+            for lst in cols.values():
+                if len(lst) < target:
+                    lst.extend([float('nan')] * (target - len(lst)))
+                elif len(lst) > target:
+                    del lst[target:]
+                    
+            pd.DataFrame(cols).to_csv(output_file_path, index=False)
+            print(f"[INFO] Full trajectory + controller channels saved to {output_file_path}")
 
             # Save the controller parameters to a JSON file
             param_dump = {
@@ -445,19 +481,13 @@ class ClosedLoopRecorder:
                 "integrator_limits"    : [self.integrator_pitch_min, self.integrator_pitch_max],
                 "alpha_angle_filter"   : self.alpha,
                 "R_BoxToKuka"          : self.R_BoxToKuka.tolist(),
-                # add anything else you want to freeze here
+                "Box-size"             : [self.real_box_width_cam1_mm,self.real_box_height_cam1_mm,self.real_box_width_cam2_mm,self.real_box_height_cam2_mm]
             }
 
             json_path = os.path.join(output_dir, f"{filename}_controller_params.json")
             with open(json_path, "w") as f:
                 json.dump(param_dump, f, indent=4)
             print(f"[INFO] Controller parameters saved to {json_path}")
-
-
-
-
-
-
 
             # Initiate timestamps array for next recording
             self.timestamps = []
@@ -797,6 +827,24 @@ class ClosedLoopRecorder:
         self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
         self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
         self.pitch_comp_label    .config(text=f"{pitch_compensation:.3f}")
+        # record the parameters ---------------------------------------------------------------------------------
+        if self.recording:
+            # ───── pitch channels ─────────────────────────────
+            self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.current_pitch_rec.append(current_pitch)
+            self.pitch_error_rec.append(error_pitch)
+            self.pitch_comp_rec.append(pitch_compensation)
+            self.pitch_comp_iterm_rec.append(pitch_compensation_iterm)
+            self.pitch_comp_pterm_rec.append(pitch_compensation_pterm)
+
+            # ───── yaw channels (you already computed them above) ─
+            self.current_yaw_rec.append(yaw_setpoint)  # or whatever var you use
+            self.yaw_setpoint_rec.append(yaw_setpoint)
+            self.yaw_error_rec.append(error_yaw)
+            self.yaw_pterm_rec.append(yaw_pterm)
+            self.yaw_iterm_rec.append(yaw_iterm)
+            self.yaw_comp_rec.append(delta_rot[1])      # the compensation you sent
+
         return 
 
     def straight_controller(self,time_controller):
@@ -852,12 +900,11 @@ class ClosedLoopRecorder:
         #send the new position and rotation
         self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
 
-        # update the gui
+        # update the gui--------------------------------------------------------------------------------------
         yaw_setpoint = 0
         error_yaw = 0
         yaw_pterm = 0
         yaw_iterm = 0
-
 
         self.current_yaw_label .config(text=f"{yaw_setpoint:.3f} rad")
         self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
@@ -866,13 +913,30 @@ class ClosedLoopRecorder:
         self.yaw_iterm_label  .config(text=f"{yaw_iterm:.3f}")
         self.yaw_comp_label   .config(text=f"{delta_rot[1]:.3f}")
 
-        # === And for the pitch panel (as before) ===
         self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
         self.pitch_setpoint_label.config(text=f"{pitch_setpoint:.3f} rad")
         self.pitch_error_label   .config(text=f"{error_pitch:.3f} rad")
         self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
         self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
         self.pitch_comp_label    .config(text=f"{pitch_compensation:.3f}")
+
+        # record the parameters ---------------------------------------------------------------------------------
+        if self.recording:
+            # ───── pitch channels ─────────────────────────────
+            self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.current_pitch_rec.append(current_pitch)
+            self.pitch_error_rec.append(error_pitch)
+            self.pitch_comp_rec.append(pitch_compensation)
+            self.pitch_comp_iterm_rec.append(pitch_compensation_iterm)
+            self.pitch_comp_pterm_rec.append(pitch_compensation_pterm)
+
+            # ───── yaw channels (you already computed them above) ─
+            self.current_yaw_rec.append(yaw_setpoint)  # or whatever var you use
+            self.yaw_setpoint_rec.append(yaw_setpoint)
+            self.yaw_error_rec.append(error_yaw)
+            self.yaw_pterm_rec.append(yaw_pterm)
+            self.yaw_iterm_rec.append(yaw_iterm)
+            self.yaw_comp_rec.append(delta_rot[1])      # the compensation you sent
         return 
 
     def calibrate_kuka(self):
@@ -938,6 +1002,26 @@ class ClosedLoopRecorder:
             self.X_3d_recording.append(self.X_3d[-1])
             self.Y_3d_recording.append(self.Y_3d[-1])
             self.Z_3d_recording.append(self.Z_3d[-1])
+
+            if not self.controller_boolean:
+                # ───── pitch channels ─────────────────────────────
+                self.pitch_setpoint_rec.append(0)
+                self.current_pitch_rec.append(0)
+                self.pitch_error_rec.append(0)
+                self.pitch_comp_rec.append(0)
+                self.pitch_comp_iterm_rec.append(0)
+                self.pitch_comp_pterm_rec.append(0)
+
+                # ───── yaw channels (you already computed them above) ─
+                self.current_yaw_rec.append(0)  # or whatever var you use
+                self.yaw_setpoint_rec.append(0)
+                self.yaw_error_rec.append(0)
+                self.yaw_pterm_rec.append(0)
+                self.yaw_iterm_rec.append(0)
+                self.yaw_comp_rec.append(0)      # the compensation you sent
+
+
+
             print("Writing frame to video")
             if frame1 is None:
                 print("frame is none")
