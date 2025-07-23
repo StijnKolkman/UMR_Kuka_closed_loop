@@ -15,7 +15,7 @@ def generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=50,d
     dy = length_m * math.sin(direction_rad)
     X1 = X0 + dx
     Y1 = Y0 + dy
-    Z0 = Z0 
+    Z0 = Z0
 
     # linearly interpolate X, Y; keep Z constant
     x_vals = np.linspace(X0, X1, num_points)

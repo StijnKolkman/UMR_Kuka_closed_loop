@@ -58,9 +58,11 @@ class ClosedLoopRecorder:
         self.integrator_pitch_max = 0.5  # Maximum integrator value to prevent windup
         self.integrator_pitch_min = -0.5  # Minimum integrator value to prevent windup
         self.Kp_pitch = 0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
-        self.Ki_pitch = 0.001  # Integral gain for pitch control. i just made it small
-        self.pitch_compensation_min = -0.02
-        self.pitch_compensation_max = +0.02
+        self.Ki_pitch = 0.005  # Integral gain for pitch control. i just made it small
+        self.pitch_compensation_min = -0.008
+        self.pitch_compensation_max = +0.008
+        self.offset_angle = 0.0
+        self.interval_time = 0.0
 
         # Reconstruction / ROI state
         self.pose = None
@@ -162,8 +164,8 @@ class ClosedLoopRecorder:
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
         #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -782,13 +784,17 @@ class ClosedLoopRecorder:
 
         pitch_compensation = pitch_compensation_pterm + pitch_compensation_iterm
         pitch_compensation= max(self.pitch_compensation_min, min(pitch_compensation, self.pitch_compensation_max))
-        delta_pos_pitch_compensation = np.array([np.cos(-self.angle_1_filtered)*pitch_compensation, np.sin(-self.angle_1_filtered)*pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
+        delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
         print(delta_pos_pitch_compensation)
 
         # ANGLE CONTROLLER
         # Update the orientation of the kuka
-        offset_angle = -50
-        current_angle = self.angle_1_filtered+np.radians(offset_angle)
+
+        self.interval_time += dt
+        if self.interval_time >= 5.0:
+            self.offset_angle += 1.0
+            self.interval_time = 0.0
+        current_angle = self.angle_1_filtered+np.radians(self.offset_angle)
         delta_rot = np.array([0, current_angle,0]) #here I also apply a small pitch down to compensate for the moving upwards of the umr
 
         # Update the position of the kuka
@@ -814,7 +820,7 @@ class ClosedLoopRecorder:
 
 
         self.current_yaw_label .config(text=f"{current_angle:.3f} rad")
-        self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
+        self.yaw_setpoint_label.config(text=f"{self.offset_angle:.3f} rad")
         self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
         self.yaw_pterm_label  .config(text=f"{yaw_pterm:.3f}")
         self.yaw_iterm_label  .config(text=f"{yaw_iterm:.3f}")
@@ -839,7 +845,7 @@ class ClosedLoopRecorder:
 
             # ───── yaw channels (you already computed them above) ─
             self.current_yaw_rec.append(yaw_setpoint)  # or whatever var you use
-            self.yaw_setpoint_rec.append(yaw_setpoint)
+            self.yaw_setpoint_rec.append(self.offset_angle)
             self.yaw_error_rec.append(error_yaw)
             self.yaw_pterm_rec.append(yaw_pterm)
             self.yaw_iterm_rec.append(yaw_iterm)
@@ -891,7 +897,7 @@ class ClosedLoopRecorder:
         delta_pos = current_pos-start_pos + delta_pos_pitch_compensation
 
         #rotate the rot and pos
-        delta_pos, delta_rot = recorder_functions.transform_pose(self.R_BoxToKukadelta_pos, delta_rot)
+        delta_pos, delta_rot = recorder_functions.transform_pose(self.R_BoxToKuka,delta_pos, delta_rot)
 
         #apply to calibrated start position
         self.kuka_new_pos = self.kuka_start_pos+delta_pos
