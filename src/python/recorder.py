@@ -51,7 +51,10 @@ class ClosedLoopRecorder:
         self.controller_boolean = False
         self.motor_velocity_rad = 0.0
         self.motor_boolean = False
+        self.offset_angle = 0.0
+        self.interval_time = 0.0
 
+        #pitch settings
         self.last_time_controller = None
         self.pitch_setpoint_gain = 49.09 # Simple linear map. 16mm error will cause a 45 degrees pitch 
         self.integrator_pitch = 0.0
@@ -61,8 +64,10 @@ class ClosedLoopRecorder:
         self.Ki_pitch = 0.005  # Integral gain for pitch control. i just made it small
         self.pitch_compensation_min = -0.008
         self.pitch_compensation_max = +0.008
-        self.offset_angle = 0.0
-        self.interval_time = 0.0
+
+        #yaw settings
+        self.look_ahead_offset = 10.0
+        self.yaw_setpoint_gain = 
 
         # Reconstruction / ROI state
         self.pose = None
@@ -787,15 +792,42 @@ class ClosedLoopRecorder:
         delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
         print(delta_pos_pitch_compensation)
 
-        # ANGLE CONTROLLER
+        # YAW Controller
         # Update the orientation of the kuka
-
+        """
         self.interval_time += dt
         if self.interval_time >= 5.0:
             self.offset_angle += 1.0
             self.interval_time = 0.0
         current_angle = self.angle_1_filtered+np.radians(self.offset_angle)
         delta_rot = np.array([0, current_angle,0]) #here I also apply a small pitch down to compensate for the moving upwards of the umr
+        """
+
+        index_ahead = index_nearest_reference_point+self.look_ahead_offset
+        y_nearest_ref = self.trajectory_3d[index_ahead, 1]
+
+        dy = self.y_3d[-1] - y_nearest_ref  # Calculate the difference in y position with the point ĺook_ahead_offset´
+        yaw_setpoint = self.yaw_setpoint_gain * dy # minus‐sign so negative error ⇒ positive (nose‐up)
+        yaw_setpoint = max(min(yaw_setpoint,  math.pi/4), -math.pi/4)
+        current_pitch = -self.angle_2_filtered  # Assuming angle_2 is the pitch angle
+
+        error_pitch = pitch_setpoint - current_pitch
+        pitch_compensation_pterm = self.Kp_pitch * error_pitch  # Proportional control for pitch
+
+        self.integrator_pitch += error_pitch * dt  # Update the integrator for pitch
+        if self.integrator_pitch_min is not None:
+            self.integrator_pitch = max(self.integrator_pitch_min, self.integrator_pitch)
+        if self.integrator_pitch_max is not None:
+            self.integrator_pitch = min(self.integrator_pitch_max, self.integrator_pitch)
+        pitch_compensation_iterm = self.Ki_pitch * self.integrator_pitch  # Integral control for pitch
+
+        pitch_compensation = pitch_compensation_pterm + pitch_compensation_iterm
+        pitch_compensation= max(self.pitch_compensation_min, min(pitch_compensation, self.pitch_compensation_max))
+        delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
+        print(delta_pos_pitch_compensation)
+
+
+
 
         # Update the position of the kuka
         current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
