@@ -71,8 +71,8 @@ class ClosedLoopRecorder:
         self.integrator_yaw = 0.0
         self.integrator_yaw_max = 0.5  # Maximum integrator value to prevent windup
         self.integrator_yaw_min = -0.5  # Minimum integrator value to prevent windup
-        self.Kp_yaw = 0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
-        self.Ki_yaw = 0.005  # Integral gain for pitch control. i just made it small
+        self.Kp_yaw = 1  # Proportional gain for yaw control --> this makes 30 degrees error into 30degrees input moving forward
+        self.Ki_yaw = 0.1  # 
         self.yaw_compensation_min = np.radians(-30) # Minimum yaw compensation in radians
         self.yaw_compensation_max = np.radians(30)  # Maximum yaw compensation in radians
 
@@ -787,8 +787,7 @@ class ClosedLoopRecorder:
         delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
         print(delta_pos_pitch_compensation)
 
-        # YAW Controller
-        # Update the orientation of the kuka
+        # YAW Controller --> yaw is controlled by the kuka rotating around the Z axis
         index_ahead = index_nearest_reference_point+self.look_ahead_offset
         if index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
             index_ahead = len(self.trajectory_3d) - 1  # Prevent going out of bounds
@@ -815,6 +814,8 @@ class ClosedLoopRecorder:
         yaw_compensation = yaw_compensation_pterm + yaw_compensation_iterm
         yaw_compensation= max(self.yaw_compensation_min, min(yaw_compensation, self.yaw_compensation_max))
         print(yaw_compensation)
+
+        # update the rotation of the kuka
         delta_rot = np.array([0, 0, yaw_compensation])  # Apply yaw compensation by rotating the kuka
 
         # Update the position of the kuka
@@ -998,20 +999,18 @@ class ClosedLoopRecorder:
         return X0, Y0, Z0
     
     def update_frame(self):
+
+        # This function is called periodically to update the video frames in the GUI and update the trajectory and controller 
         
         # Check if the window is still open before updating
         if not self.window.winfo_exists():
             return
         
-        #Read the frames
-        # Read 30 frames ahead (skip 30 frames)
-        #for _ in range(30):
-        #    ret1, frame1 = self.cap1.read()  # Read but discard 30 frames from camera 1
-        #    ret2, frame2 = self.cap2.read()  # Read but discard 30 frames from camera 2
-
+        # read the frames from the cameras
         ret1, frame1 = self.cap1.read()
         ret2, frame2 = self.cap2.read()
 
+        # save the frames and parameters if recording is active
         if self.recording and ret1 and ret2: 
             # Save frames
             self.N_frames += 1
@@ -1023,8 +1022,13 @@ class ClosedLoopRecorder:
             self.Y_3d_recording.append(self.Y_3d[-1])
             self.Z_3d_recording.append(self.Z_3d[-1])
 
-            if not self.controller_boolean:
-                # ───── pitch channels ─────────────────────────────
+            #print("Writing frame to video")
+            #if frame1 is None:
+            #    print("frame is none")
+            
+            # if the controller is not active, we append zeros to the controller records
+            if not self.controller_boolean: 
+                #pitch channels
                 self.pitch_setpoint_rec.append(0)
                 self.current_pitch_rec.append(0)
                 self.pitch_error_rec.append(0)
@@ -1032,19 +1036,13 @@ class ClosedLoopRecorder:
                 self.pitch_comp_iterm_rec.append(0)
                 self.pitch_comp_pterm_rec.append(0)
 
-                # ───── yaw channels (you already computed them above) ─
-                self.current_yaw_rec.append(0)  # or whatever var you use
+                #yaw channels
+                self.current_yaw_rec.append(0)
                 self.yaw_setpoint_rec.append(0)
                 self.yaw_error_rec.append(0)
                 self.yaw_pterm_rec.append(0)
                 self.yaw_iterm_rec.append(0)
-                self.yaw_comp_rec.append(0)      # the compensation you sent
-
-
-
-            print("Writing frame to video")
-            if frame1 is None:
-                print("frame is none")
+                self.yaw_comp_rec.append(0)
             
         if ret1:
             # Update the GUI with the frame --> first the frame is resized to fit in the GUI
@@ -1052,12 +1050,12 @@ class ClosedLoopRecorder:
             if self.UMR_1_roi is not None:
                 x, y, w, h = [int(v) for v in self.box_1_roi]
                 cv2.rectangle(frame1_display, (x,y), (x+w,y+h), (255,0,0), 4)
+
                 # Update the tracker 
                 self.UMR_1_bounding_box, self.UMR_1_roi,self.UMR_1_angle_measured, self.UMR_1_center_x, self.UMR_1_center_y = recorder_functions.update_roi_center(frame1, self.UMR_1_roi)
                 x, y, w, h = [int(v) for v in self.UMR_1_roi]
                 #cv2.rectangle(frame1_display, (x,y), (x+w,y+h), (0,0,255), 4) #This can draw the ROI around the umr, but it is not needed
-                # Draw the bounding box around the umr 
-                cv2.drawContours(frame1_display, [self.UMR_1_bounding_box + (x, y)], 0, (0, 0, 255), 2)
+                cv2.drawContours(frame1_display, [self.UMR_1_bounding_box + (x, y)], 0, (0, 0, 255), 2) # Draw the bounding box around the umr 
 
             frame1_resized = cv2.resize(frame1_display, (576, 324), interpolation=cv2.INTER_LINEAR)    
             frame_rgb1 = cv2.cvtColor(frame1_resized, cv2.COLOR_BGR2RGB)
@@ -1065,26 +1063,26 @@ class ClosedLoopRecorder:
             self.video_label1.imgtk = img1
             self.video_label1.config(image=img1)
 
-
         if ret2:
             # Update the GUI with the frame --> first the frame is resized to fit in the GUI 
             frame2_display = frame2.copy()
             if self.UMR_2_roi is not None:
                 x, y, w, h = [int(v) for v in self.box_2_roi]
                 cv2.rectangle(frame2_display, (x,y), (x+w,y+h), (255,0,0), 4)
+
                 # Update the tracker 
                 self.UMR_2_bounding_box,self.UMR_2_roi,self.UMR_2_angle_measured, self.UMR_2_center_x, self.UMR_2_center_y = recorder_functions.update_roi_center(frame2, self.UMR_2_roi)
                 x, y, w, h = [int(v) for v in self.UMR_2_roi]
                 #cv2.rectangle(frame2_display, (x,y), (x+w,y+h), (0,0,255), 4) #This can draw the ROI around the umr, but it is not needed
-                # Draw the bounding box around the umr
-                cv2.drawContours(frame2_display, [self.UMR_2_bounding_box + (x, y)], 0, (0, 0, 255), 2)    
+                cv2.drawContours(frame2_display, [self.UMR_2_bounding_box + (x, y)], 0, (0, 0, 255), 2) # Draw the bounding box around the umr   
+
             frame2_resized = cv2.resize(frame2_display, (576, 324), interpolation=cv2.INTER_LINEAR)    
             frame_rgb2 = cv2.cvtColor(frame2_resized, cv2.COLOR_BGR2RGB)
             img2 = ImageTk.PhotoImage(Image.fromarray(frame_rgb2))
             self.video_label2.imgtk = img2
             self.video_label2.config(image=img2)
 
-        # Update the reconstructed pose and angle based on the UMRs and box positions
+        # Update the reconstructed pose and angle in the GUI based on the UMRs and box positions
         if self.reconstruction_boolean is True:
             self.update_trajectory()
             if len(self.X_3d) % 5 == 0:  # only redraw every 5th frame
@@ -1094,13 +1092,13 @@ class ClosedLoopRecorder:
             self.angle1_label.config(text=f"Angle 1: {math.degrees(self.angle_1):.2f}°")
             self.angle2_label.config(text=f"Angle 2: {math.degrees(self.angle_2):.2f}°")
 
-        # Update the controller
+        # Update the controller if the controller is active
         if self.controller_boolean is True:
             if self.reconstruction_boolean is False:
                 print("First turn the reconstructor on")
                 return
             time_controller = time.perf_counter()
-            self.controller(time_controller)
+            self.controller(time_controller) # or self.straight_controller(time_controller) for straight controller
 
         self.window.after(10, self.update_frame)
 
@@ -1118,10 +1116,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = ClosedLoopRecorder(root)
     root.mainloop()
-
-
-
-
-    #TODO: GAUSSIAN BLUR IN DE TRACKER
-    #TODO: 19.85mm boven bakbovenkant
-    #TODO: ff checken of trajectory opslaan telkens wel goed gaat
