@@ -66,8 +66,15 @@ class ClosedLoopRecorder:
         self.pitch_compensation_max = +0.008
 
         #yaw settings
-        self.look_ahead_offset = 10.0
-        self.yaw_setpoint_gain = 
+        self.look_ahead_offset = 0
+        self.yaw_setpoint_gain = 52.00 # Simple linear map. 10mm error will cause a 30 degrees yaw 
+        self.integrator_yaw = 0.0
+        self.integrator_yaw_max = 0.5  # Maximum integrator value to prevent windup
+        self.integrator_yaw_min = -0.5  # Minimum integrator value to prevent windup
+        self.Kp_yaw = 0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
+        self.Ki_yaw = 0.005  # Integral gain for pitch control. i just made it small
+        self.yaw_compensation_min = np.radians(-30) # Minimum yaw compensation in radians
+        self.yaw_compensation_max = np.radians(30)  # Maximum yaw compensation in radians
 
         # Reconstruction / ROI state
         self.pose = None
@@ -748,33 +755,21 @@ class ClosedLoopRecorder:
         if self.trajectory_3d is None or len(self.trajectory_3d) == 0:
             return
         
-        # update dt --> needed for the controller
+        # update dt --> needed for integrator term
         if self.last_time_controller is None:
             self.last_time_controller = time_controller
             return
         else:
             dt = time_controller - self.last_time_controller
             self.last_time_controller = time_controller
-
-        # THE SIMPLE BANG CONTROLLER 
-            """
-            index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
-            X_nearest_ref, y_nearest_ref = self.trajectory_3d[index_nearest_reference_point, :2]
-            error_y = self.Y_3d[-1]-y_nearest_ref
-            print(error_y)
-            if error_y > 0:
-                offset_angle = -30
-            else: 
-                offset_angle = 30
-            """
         
         # PITCH CONTROLLER --> pitch is controlled by the kuka moving in front or back of the umr
         index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
         z_nearest_ref = self.trajectory_3d[index_nearest_reference_point, 2]
 
         dz = self.Z_3d[-1] - z_nearest_ref  # Calculate the difference in Z position 
-        pitch_setpoint = self.pitch_setpoint_gain * dz # minus‐sign so negative error ⇒ positive (nose‐up)
-        pitch_setpoint = max(min(pitch_setpoint,  math.pi/4), -math.pi/4)
+        pitch_setpoint = self.pitch_setpoint_gain * dz 
+        pitch_setpoint = max(min(pitch_setpoint,  math.pi/4), -math.pi/4) # limit the pitch setpoint to ±45 degrees
         current_pitch = -self.angle_2_filtered  # Assuming angle_2 is the pitch angle
 
         error_pitch = pitch_setpoint - current_pitch
@@ -794,40 +789,33 @@ class ClosedLoopRecorder:
 
         # YAW Controller
         # Update the orientation of the kuka
-        """
-        self.interval_time += dt
-        if self.interval_time >= 5.0:
-            self.offset_angle += 1.0
-            self.interval_time = 0.0
-        current_angle = self.angle_1_filtered+np.radians(self.offset_angle)
-        delta_rot = np.array([0, current_angle,0]) #here I also apply a small pitch down to compensate for the moving upwards of the umr
-        """
-
         index_ahead = index_nearest_reference_point+self.look_ahead_offset
+        if index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
+            index_ahead = len(self.trajectory_3d) - 1  # Prevent going out of bounds
         y_nearest_ref = self.trajectory_3d[index_ahead, 1]
+        yaw_trajectory = self.trajectory_3d[index_ahead, 3]  # get the yaw angle from the trajectory
 
-        dy = self.y_3d[-1] - y_nearest_ref  # Calculate the difference in y position with the point ĺook_ahead_offset´
-        yaw_setpoint = self.yaw_setpoint_gain * dy # minus‐sign so negative error ⇒ positive (nose‐up)
-        yaw_setpoint = max(min(yaw_setpoint,  math.pi/4), -math.pi/4)
-        current_pitch = -self.angle_2_filtered  # Assuming angle_2 is the pitch angle
+        dy = self.Y_3d[-1] - y_nearest_ref  # The difference in Y position. Meaning if the robot is too far to the right or left of the trajectory
+        yaw_correction = self.yaw_setpoint_gain * -dy #The steering yaw correction, based on the distance to the trajectory 
+        yaw_setpoint = yaw_trajectory + yaw_correction  # The desired yaw angle is the trajectory yaw plus the correction
 
-        error_pitch = pitch_setpoint - current_pitch
-        pitch_compensation_pterm = self.Kp_pitch * error_pitch  # Proportional control for pitch
+        yaw_setpoint = max(min(yaw_setpoint,  math.pi/2), -math.pi/2) # limit the yaw setpoint to ±90 degrees  
+        current_yaw = self.angle_1_filtered  # Assuming angle_1 is the yaw angle
 
-        self.integrator_pitch += error_pitch * dt  # Update the integrator for pitch
-        if self.integrator_pitch_min is not None:
-            self.integrator_pitch = max(self.integrator_pitch_min, self.integrator_pitch)
-        if self.integrator_pitch_max is not None:
-            self.integrator_pitch = min(self.integrator_pitch_max, self.integrator_pitch)
-        pitch_compensation_iterm = self.Ki_pitch * self.integrator_pitch  # Integral control for pitch
+        error_yaw = yaw_setpoint - current_yaw   
+        yaw_compensation_pterm = self.Kp_yaw * error_yaw  # Proportional control for yaw
 
-        pitch_compensation = pitch_compensation_pterm + pitch_compensation_iterm
-        pitch_compensation= max(self.pitch_compensation_min, min(pitch_compensation, self.pitch_compensation_max))
-        delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0])  # Apply pitch compensation by moving the kuka in front or back of the UMR
-        print(delta_pos_pitch_compensation)
+        self.integrator_yaw += error_yaw * dt  # Update the integrator for yaw
+        if self.integrator_yaw_min is not None:
+            self.integrator_yaw = max(self.integrator_yaw_min, self.integrator_yaw)
+        if self.integrator_yaw_max is not None:
+            self.integrator_yaw = min(self.integrator_yaw_max, self.integrator_yaw)
+        yaw_compensation_iterm = self.Ki_yaw * self.integrator_yaw  # Integral control for yaw
 
-
-
+        yaw_compensation = yaw_compensation_pterm + yaw_compensation_iterm
+        yaw_compensation= max(self.yaw_compensation_min, min(yaw_compensation, self.yaw_compensation_max))
+        print(yaw_compensation)
+        delta_rot = np.array([0, 0, yaw_compensation])  # Apply yaw compensation by rotating the kuka
 
         # Update the position of the kuka
         current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
@@ -844,30 +832,25 @@ class ClosedLoopRecorder:
         #send the new position and rotation
         self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
 
-        # update the gui
-        yaw_setpoint = 0
-        error_yaw = 0
-        yaw_pterm = 0
-        yaw_iterm = 0
 
-
-        self.current_yaw_label .config(text=f"{current_angle:.3f} rad")
-        self.yaw_setpoint_label.config(text=f"{self.offset_angle:.3f} rad")
+        # Update the GUI with the controller values
+        self.current_yaw_label .config(text=f"{current_yaw:.3f} rad")
+        self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
         self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
-        self.yaw_pterm_label  .config(text=f"{yaw_pterm:.3f}")
-        self.yaw_iterm_label  .config(text=f"{yaw_iterm:.3f}")
-        self.yaw_comp_label   .config(text=f"{delta_rot[1]:.3f}")
+        self.yaw_pterm_label  .config(text=f"{yaw_compensation_pterm:.3f}")
+        self.yaw_iterm_label  .config(text=f"{yaw_compensation_iterm:.3f}")
+        self.yaw_comp_label   .config(text=f"{yaw_compensation:.3f}")
 
-        # === And for the pitch panel (as before) ===
         self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
         self.pitch_setpoint_label.config(text=f"{pitch_setpoint:.3f} rad")
         self.pitch_error_label   .config(text=f"{error_pitch:.3f} rad")
         self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
         self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
         self.pitch_comp_label    .config(text=f"{pitch_compensation:.3f}")
-        # record the parameters ---------------------------------------------------------------------------------
+
+        # record the parameters
         if self.recording:
-            # ───── pitch channels ─────────────────────────────
+            # pitch channels
             self.pitch_setpoint_rec.append(pitch_setpoint)
             self.current_pitch_rec.append(current_pitch)
             self.pitch_error_rec.append(error_pitch)
@@ -875,14 +858,13 @@ class ClosedLoopRecorder:
             self.pitch_comp_iterm_rec.append(pitch_compensation_iterm)
             self.pitch_comp_pterm_rec.append(pitch_compensation_pterm)
 
-            # ───── yaw channels (you already computed them above) ─
-            self.current_yaw_rec.append(yaw_setpoint)  # or whatever var you use
-            self.yaw_setpoint_rec.append(self.offset_angle)
+            #   yaw channels
+            self.current_yaw_rec.append(current_yaw)  
+            self.yaw_setpoint_rec.append(yaw_setpoint)
             self.yaw_error_rec.append(error_yaw)
-            self.yaw_pterm_rec.append(yaw_pterm)
-            self.yaw_iterm_rec.append(yaw_iterm)
-            self.yaw_comp_rec.append(delta_rot[1])      # the compensation you sent
-
+            self.yaw_pterm_rec.append(yaw_compensation_pterm)
+            self.yaw_iterm_rec.append(yaw_compensation_iterm)
+            self.yaw_comp_rec.append(yaw_compensation) 
         return 
 
     def straight_controller(self,time_controller):
@@ -1139,13 +1121,7 @@ if __name__ == "__main__":
 
 
 
-"""
-Plan van aanpak: 
-- bepalen feedforward door bochten te maken met umr-rpm offset van -70 tot +70
-- feedforward combineren met feedback
-- feedback tunen aan de hand van rechtdoorgaan eerst, dan curved en gekke paths enzo
-- doen op 0.2 hz
-"""
+
     #TODO: GAUSSIAN BLUR IN DE TRACKER
     #TODO: 19.85mm boven bakbovenkant
     #TODO: ff checken of trajectory opslaan telkens wel goed gaat
