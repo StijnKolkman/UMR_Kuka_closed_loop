@@ -5,9 +5,7 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import numpy as np 
 import os
-import csv
 import math
-import rclpy
 import pandas as pd
 import recorder_functions
 import datetime
@@ -16,8 +14,6 @@ import json
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.spatial.transform import Rotation as R
 
 from kuka_python_node.kuka_node import start_kuka_node
 
@@ -859,7 +855,7 @@ class ClosedLoopRecorder:
             self.pitch_comp_iterm_rec.append(pitch_compensation_iterm)
             self.pitch_comp_pterm_rec.append(pitch_compensation_pterm)
 
-            #   yaw channels
+            # yaw channels
             self.current_yaw_rec.append(current_yaw)  
             self.yaw_setpoint_rec.append(yaw_setpoint)
             self.yaw_error_rec.append(error_yaw)
@@ -999,7 +995,6 @@ class ClosedLoopRecorder:
         return X0, Y0, Z0
     
     def update_frame(self):
-
         # This function is called periodically to update the video frames in the GUI and update the trajectory and controller 
         
         # Check if the window is still open before updating
@@ -1021,10 +1016,6 @@ class ClosedLoopRecorder:
             self.X_3d_recording.append(self.X_3d[-1])
             self.Y_3d_recording.append(self.Y_3d[-1])
             self.Z_3d_recording.append(self.Z_3d[-1])
-
-            #print("Writing frame to video")
-            #if frame1 is None:
-            #    print("frame is none")
             
             # if the controller is not active, we append zeros to the controller records
             if not self.controller_boolean: 
@@ -1111,7 +1102,6 @@ class ClosedLoopRecorder:
         self.window.destroy()
         self.kuka_python.shutdown_publisher()
 
-# Used if the recorder class is called seperately
 if __name__ == "__main__":
     root = tk.Tk()
     app = ClosedLoopRecorder(root)
