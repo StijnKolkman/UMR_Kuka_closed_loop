@@ -812,7 +812,7 @@ class ClosedLoopRecorder:
         print(yaw_compensation)
 
         # update the rotation of the kuka
-        delta_rot = np.array([0, 0, yaw_compensation])  # Apply yaw compensation by rotating the kuka
+        delta_rot = np.array([0, yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
 
         # Update the position of the kuka
         current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
