@@ -35,39 +35,71 @@ def generate_curved_trajectory_3d(
     direction_rad=0.0,
     turn_left=True
 ):
-    """Generate a 3D circular-arc trajectory in the XY plane (Z constant)."""
+    """3D circular-arc trajectory in XY (Z constant).
+    Returns (N,4): [x, y, z, theta], with theta tangent to the path.
+    """
 
-    psi0 = direction_rad
-    sweep = arc_angle_rad if turn_left else -arc_angle_rad
+    psi0 = float(direction_rad)
+    R = float(radius_m)
+    phi = np.linspace(0.0, float(arc_angle_rad), int(num_points))
 
-    # center of the turning circle
     if turn_left:
-        Xc = X0 - radius_m * math.sin(psi0)
-        Yc = Y0 + radius_m * math.cos(psi0)
+        # center is to the left of the heading
+        Xc = X0 - R * math.sin(psi0)
+        Yc = Y0 + R * math.cos(psi0)
+        # vector from center to points (rotating CCW by +phi)
+        Xs = Xc + R * np.sin(psi0 + phi)
+        Ys = Yc - R * np.cos(psi0 + phi)
+        # tangent heading increases with phi
+        theta = psi0 - phi
     else:
-        Xc = X0 + radius_m * math.sin(psi0)
-        Yc = Y0 - radius_m * math.cos(psi0)
+        # center is to the right of the heading
+        Xc = X0 + R * math.sin(psi0)
+        Yc = Y0 - R * math.cos(psi0)
+        # vector from center to points (rotating CW by +phi)
+        Xs = Xc - R * np.sin(psi0 - phi)
+        Ys = Yc + R * np.cos(psi0 - phi)
+        # tangent heading decreases with phi
+        theta = psi0 + phi
 
-    # parametric arc
-    phi = np.linspace(0.0, sweep, num_points)
-    Xs = Xc + radius_m * np.sin(psi0 + phi)
-    Ys = Yc - radius_m * np.cos(psi0 + phi)
+    # ensure theta in [0, 2π)
+    theta = (theta + math.pi) % (2.0 * math.pi) - math.pi
 
-    # tangent heading at each waypoint
-    if turn_left:
-        theta = psi0 + phi + (math.pi / 2)
-    else:
-        theta = psi0 + phi - (math.pi / 2)
-
-    # wrap into [0, 2π)
-    theta = theta % (2 * math.pi)
-
-    # keep Z constant
     Zs = np.full(num_points, Z0, dtype=np.float64)
-
-    # Stack into (num_points × 4): [x_m, y_m, z_m, θ_rad]
     trajectory_3d = np.vstack((Xs, Ys, Zs, theta)).T
     return trajectory_3d
+
+def generate_sine_trajectory_3d(
+    X0, Y0, Z0,
+    length_x=1.0,
+    amplitude=0.1,
+    wavelength=1.0,
+    num_points=200
+):
+    """
+    Generates a 3D sine-wave trajectory in the XY plane.
+    X increases linearly.
+    Y = amplitude * sin(2π * X / wavelength)
+    theta is the tangent angle of the curve (atan(dy/dx)).
+    Returns (N,4): [x, y, z, theta]
+    """
+
+    Xs = np.linspace(X0, X0 + length_x, num_points)
+    Zs = np.full(num_points, Z0, dtype=np.float64)
+
+    # sinusoidal Y
+    Ys = Y0 + amplitude * np.sin(2*np.pi*(Xs - X0) / wavelength)
+
+    # derivative dY/dX = (2π / wavelength) * amplitude * cos(...)
+    dYdX = (2*np.pi / wavelength) * amplitude * np.cos(2*np.pi*(Xs - X0) / wavelength)
+
+    # tangent heading
+    theta = -np.arctan2(dYdX, 1.0)
+
+    trajectory_3d = np.vstack((Xs, Ys, Zs, theta)).T
+    return trajectory_3d
+
+
 
 def save_trajectory_to_csv(trajectory_3d, filename_entry):
     """Save a (N×4) trajectory array to a CSV file."""

@@ -184,8 +184,8 @@ class ClosedLoopRecorder:
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
         #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -606,7 +606,7 @@ class ClosedLoopRecorder:
         x_box_1_px, y_box_1_px = self.box_1_x, self.box_1_y
         origin_box1_x_px = x_box_1_px
         origin_box1_y_px = y_box_1_px + self.box_1_height_px
-        Z_box = self.cam1_to_box_distanc
+        Z_box = self.cam1_to_box_distance
         self.X_shift = (origin_box1_x_px - self.cx_cam1) * Z_box / self.fx_cam1
         self.Y_shift = (origin_box1_y_px - self.cy_cam1) * Z_box / self.fy_cam1
 
@@ -617,11 +617,17 @@ class ClosedLoopRecorder:
 
         # now make the reference trajectory! linear or curved
         X0, Y0, Z0 = self.compute_initial_world_xyz()
-        self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=50,direction_rad=0.0)
+        #self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=50,direction_rad=0.0)
 
         # alternatively:
-        #self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
-
+        #self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
+        self.trajectory_3d = recorder_functions.generate_sine_trajectory_3d(
+        X0, Y0, Z0,
+        length_x=1.0,        # total distance to travel in X
+        amplitude=0.01,       # peak Y deviation (sine amplitude)
+        wavelength=0.1,      # wavelength of the sine (in meters of X)
+        num_points=200
+    )
         recorder_functions.save_trajectory_to_csv(self.trajectory_3d,self.filename_entry)
 
     def update_trajectory_plot(self):
@@ -822,9 +828,9 @@ class ClosedLoopRecorder:
         y_nearest_ref = self.trajectory_3d[index_ahead, 1]
         yaw_trajectory = self.trajectory_3d[index_ahead, 3]
 
-        # calculate the yaw correction based on the distance to the trajectory
+        # calculate the yaw correction based on the distance to the traje_ctory
         dy = self.Y_3d[-1] - y_nearest_ref
-        yaw_correction = self.yaw_setpoint_gain * -dy
+        yaw_correction = self.yaw_setpoint_gain * dy
         yaw_setpoint = yaw_trajectory + yaw_correction  #The desired yaw angle is the trajectory yaw plus the correction
         yaw_setpoint = max(min(yaw_setpoint,  math.pi/2), -math.pi/2) # limit the yaw setpoint to ±90 degrees 
 
@@ -846,7 +852,7 @@ class ClosedLoopRecorder:
         yaw_compensation= max(self.yaw_compensation_min, min(yaw_compensation, self.yaw_compensation_max))
 
         # update the rotation of the kuka
-        delta_rot = np.array([0, yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
+        delta_rot = np.array([0, self.angle_1_filtered+yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
 
         # KUKA POSITION UPDATE -----------------------------------------------------------------
         current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
@@ -868,8 +874,8 @@ class ClosedLoopRecorder:
         self.current_yaw_label .config(text=f"{current_yaw:.3f} rad")
         self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
         self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
-        self.yaw_pterm_label  .config(text=f"{yaw_compensation_pterm:.3f}")
-        self.yaw_iterm_label  .config(text=f"{yaw_compensation_iterm:.3f}")
+        self.yaw_pterm_label  .config(text=f"{yaw_trajectory :.3f}")
+        self.yaw_iterm_label  .config(text=f"{yaw_correction :.3f}")
         self.yaw_comp_label   .config(text=f"{yaw_compensation:.3f}")
 
         self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
@@ -1179,3 +1185,9 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = ClosedLoopRecorder(root)
     root.mainloop()
+
+
+    #TODO: update controller parameters JSON file
+    #TODO: nadenken of we pitch ook een direction willen geven al vantevoren
+    #TODO: heading plotten
+    #TODO: distance alleen y
