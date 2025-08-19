@@ -1,13 +1,16 @@
 import rclpy
 from rclpy.node import Node
+from std_msgs.msg import Bool
+
 from kukapythonvarproxy.KRL_Pos import KRLPos
 from kukapythonvarproxy.KRL_Parameter import KRLParam
+
 from kuka_interfaces.msg import KukaWriteVariable, KukaAction, KukaPos
 from kuka_interfaces.srv import KukaReadVariable
-from std_msgs.msg import Bool
-import time
 
 class KukaCommander(Node):
+    """ROS2 node that listens for target poses and triggers KUKA moves when ready."""
+
     def __init__(self):
         super().__init__("kuka_commander")
 
@@ -23,12 +26,14 @@ class KukaCommander(Node):
         self.newest_position = None
 
     def update_position(self, msg: KukaPos):
+        """Update the newest position from the received KukaPos message."""
 
-        # Callback to receive new target pose
         self.newest_position = (msg.x, msg.y, msg.z, msg.a, msg.b, msg.c)
         #self.get_logger().info(f'Received new target pose: {self.newest_position}')
 
     def publish_joint_move(self, msg):
+        """Publish a joint move command to the KUKA when the position is ready."""
+
         if not msg.data:
             return
     
@@ -55,6 +60,8 @@ class KukaCommander(Node):
         #self.get_logger().info("Published joint move command.")
 
     def set_rounding(self, rounding_value):
+        """Set the rounding value for KUKA commands."""
+        
         action = KukaAction()
         rounding = KRLParam("COM_ROUNDM")
         rounding.set_value(rounding_value)
@@ -78,17 +85,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
-
-#OLD CODE
-# # set toolframe
-# action = KukaAction()
-# tool_frame = KukaWriteVariable()
-# tool_frame.name = "COM_FRAME"
-
-# tool = KRLPos("COM_FRAME")
-# tool.set_all(0.0,140.0,36.0,90.0,0.0,180.0)
-# tool_frame.value = tool.get_KRL_string()
-# action.com_action = 5
-# action.variable = [tool_frame]
-# self.kuka_action_pub.publish(action)
