@@ -250,6 +250,62 @@ def find_nearest_trajectory_point(trajectory_3d, current_x, current_y):
     index = np.argmin(distances)
     return index
 
+def closest_point_on_polyline_3d(traj_xyz: np.ndarray, p_xyz: np.ndarray):
+    """
+    Find the closest 3D point on a polyline (waypoints) to a query point.
+
+    Parameters
+    ----------
+    traj_xyz : (N,3) float array
+        Polyline waypoints [x,y,z], N >= 2.
+    p_xyz : (3,) float array
+        Query point [x,y,z].
+
+    Returns
+    -------
+    q_best : (3,) float array
+        Closest point on the polyline.
+    i_best : int
+        Index of the segment [i_best -> i_best+1] containing q_best.
+    t_best : float
+        Parametric position along that segment (0 = start, 1 = end).
+    """
+    traj_xyz = np.asarray(traj_xyz, dtype=float)
+    p = np.asarray(p_xyz, dtype=float)
+    N = len(traj_xyz)
+    if N == 0:
+        raise ValueError("Empty trajectory.")
+    if N == 1:
+        # Only a single point: that's the closest
+        return traj_xyz[0].copy(), 0, 0.0
+
+    best_d2 = np.inf
+    q_best = traj_xyz[0].copy()
+    i_best = 0
+    t_best = 0.0
+
+    for i in range(N - 1):
+        a = traj_xyz[i]
+        b = traj_xyz[i + 1]
+        v = b - a
+        L2 = float(np.dot(v, v))
+        if L2 < 1e-12:  # degenerate segment
+            t = 0.0
+            q = a
+        else:
+            t = float(np.dot(p - a, v) / L2)
+            t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+            q = a + t * v
+
+        d2 = float(np.dot(p - q, p - q))
+        if d2 < best_d2:
+            best_d2 = d2
+            q_best = q
+            i_best = i
+            t_best = t
+
+    return i_best
+
 def transform_pose(R_BoxToKuka, old_pos, old_rot):
     """Transform 3D pose (xyz + Euler xyz) from box frame to KUKA frame."""
     # Transform position
