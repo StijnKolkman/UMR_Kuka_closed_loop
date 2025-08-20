@@ -66,23 +66,27 @@ class ClosedLoopRecorder:
         self.last_time_controller = None
         self.pitch_setpoint_gain = 49.09 # Simple linear map. 16mm error will cause a 45 degrees pitch 
         self.integrator_pitch = 0.0
-        self.integrator_pitch_max = 0.5  # Maximum integrator value to prevent windup
-        self.integrator_pitch_min = -0.5  # Minimum integrator value to prevent windup
-        self.Kp_pitch = 0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
+        self.integrator_pitch_max = 1  # Maximum integrator value to prevent windup
+        self.integrator_pitch_min = -1 # was 0.5  # Minimum integrator value to prevent windup
+        self.Kp_pitch = 0.1 #0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
         self.Ki_pitch = 0.005  # Integral gain for pitch control. i just made it small
-        self.pitch_compensation_min = -0.008
-        self.pitch_compensation_max = +0.008
+        self.pitch_compensation_min = -0.015
+        self.pitch_compensation_max = +0.015 #was 0.008
+        self.last_error_pitch = None  # Store last pitch error for integrator calculation
+        self.kaw = 0.9  # anti-windup gain (tune 0.2–1.0)
+        self.index_nearest_reference_point = None  # Index of the nearest reference point in the trajectory
 
         #yaw settings
         self.look_ahead_offset = 0
         self.yaw_setpoint_gain = 52.00 # Simple linear map. 10mm error will cause a 30 degrees yaw 
         self.integrator_yaw = 0.0
-        self.integrator_yaw_max = 0.5  # Maximum integrator value to prevent windup
-        self.integrator_yaw_min = -0.5  # Minimum integrator value to prevent windup
+        self.integrator_yaw_max = 5  # Maximum integrator value to prevent windup
+        self.integrator_yaw_min = -5 #was 0.5  # Minimum integrator value to prevent windup
         self.Kp_yaw = 1  # Proportional gain for yaw control --> this makes 30 degrees error into 30degrees input moving forward
-        self.Ki_yaw = 0.1  # 
+        self.Ki_yaw = 0.2 # was 0.1  # 
         self.yaw_compensation_min = np.radians(-30) # Minimum yaw compensation in radians
         self.yaw_compensation_max = np.radians(30)  # Maximum yaw compensation in radians
+        self.last_error_yaw = None  # Store last yaw error for integrator calculation
 
         # Reconstruction / ROI state
         self.pose = None
@@ -511,15 +515,37 @@ class ClosedLoopRecorder:
 
             # Save the controller parameters to a JSON file
             param_dump = {
-                "timestamp_iso"        : datetime.datetime.now().isoformat(timespec="seconds"),
-                "motor_velocity_rad"   : self.motor_velocity_rad,
-                "pitch_setpoint_gain"  : self.pitch_setpoint_gain,
-                "Kp_pitch"             : self.Kp_pitch,
-                "Ki_pitch"             : self.Ki_pitch,
-                "integrator_limits"    : [self.integrator_pitch_min, self.integrator_pitch_max],
-                "alpha_angle_filter"   : self.alpha,
-                "R_BoxToKuka"          : self.R_BoxToKuka.tolist(),
-                "Box-size"             : [self.real_box_width_cam1_mm,self.real_box_height_cam1_mm,self.real_box_width_cam2_mm,self.real_box_height_cam2_mm]
+                "timestamp_iso"          : datetime.datetime.now().isoformat(timespec="seconds"),
+                "motor_velocity_rad"     : self.motor_velocity_rad,
+
+                # --- Pitch settings ---
+                "pitch_setpoint_gain"    : self.pitch_setpoint_gain,
+                "Kp_pitch"               : self.Kp_pitch,
+                "Ki_pitch"               : self.Ki_pitch,
+                "integrator_pitch"       : self.integrator_pitch,
+                "integrator_pitch_limits": [self.integrator_pitch_min, self.integrator_pitch_max],
+                "pitch_compensation_limits": [self.pitch_compensation_min, self.pitch_compensation_max],
+                "last_error_pitch"       : self.last_error_pitch,
+                "kaw_pitch"              : self.kaw,
+
+                # --- Yaw settings ---
+                "yaw_setpoint_gain"      : self.yaw_setpoint_gain,
+                "Kp_yaw"                 : self.Kp_yaw,
+                "Ki_yaw"                 : self.Ki_yaw,
+                "integrator_yaw"         : self.integrator_yaw,
+                "integrator_yaw_limits"  : [self.integrator_yaw_min, self.integrator_yaw_max],
+                "yaw_compensation_limits": [self.yaw_compensation_min, self.yaw_compensation_max],
+                "look_ahead_offset"      : self.look_ahead_offset,
+
+                # --- Common / misc ---
+                "alpha_angle_filter"     : self.alpha,
+                "R_BoxToKuka"            : self.R_BoxToKuka.tolist(),
+                "Box_size"               : [
+                    self.real_box_width_cam1_mm,
+                    self.real_box_height_cam1_mm,
+                    self.real_box_width_cam2_mm,
+                    self.real_box_height_cam2_mm
+                ],
             }
 
             json_path = os.path.join(output_dir, f"{filename}_controller_params.json")
@@ -655,6 +681,12 @@ class ClosedLoopRecorder:
             planned_Z = planned[:, 2]*1000 
             self.ax3d.plot(planned_X, planned_Y, planned_Z, label="Planned",color='black',linestyle='--')
 
+        # highlight the nearest waypoint if available
+        if isinstance(getattr(self, 'index_nearest_reference_point', None), (int, np.integer)):
+            idx = int(np.clip(self.index_nearest_reference_point, 0, len(planned)-1))
+            wp = planned[idx] * 1000.0
+            self.ax3d.scatter(wp[0], wp[1], wp[2], color='red', s=60, marker='o', label="Nearest waypoint")
+
         # calibration box dimensions (mm)
         w = self.real_box_width_cam1_mm      # width in mm
         h = self.real_box_height_cam1_mm     # height in mm (camera 1 view)
@@ -783,15 +815,24 @@ class ClosedLoopRecorder:
             self.last_time_controller = time_controller
             return
         else:
-            dt = time_controller - self.last_time_controller
+            dt_raw = time_controller - self.last_time_controller
             self.last_time_controller = time_controller
+
+        # make dt robust against zero and outliers
+        DT_MIN = 1e-3      # 1 ms lower bound (avoid zero)
+        DT_MAX = 0.10      # 100 ms upper bound
+
+        # Clip dt into a safe range
+        dt = min(max(float(dt_raw), DT_MIN), DT_MAX)
         
         # PITCH CONTROLLER-------------------------------------------------------------------------
         # pitch is controlled by the kuka moving in front or back of the umr
 
         # pick the nearest reference point in the trajectory
-        index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
-        z_nearest_ref = self.trajectory_3d[index_nearest_reference_point, 2]
+        #index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
+        self.index_nearest_reference_point = recorder_functions.closest_point_on_polyline_3d(self.trajectory_3d,[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
+        z_nearest_ref = self.trajectory_3d[self.index_nearest_reference_point, 2]
+
 
         # calculate pitch setpoint based on the nearest reference point
         dz = self.Z_3d[-1] - z_nearest_ref
@@ -805,15 +846,23 @@ class ClosedLoopRecorder:
         # Proportional and Integral control for pitch
         pitch_compensation_pterm = self.Kp_pitch * error_pitch 
 
-        self.integrator_pitch += error_pitch * dt
-        if self.integrator_pitch_min is not None:
-            self.integrator_pitch = max(self.integrator_pitch_min, self.integrator_pitch)
-        if self.integrator_pitch_max is not None:
-            self.integrator_pitch = min(self.integrator_pitch_max, self.integrator_pitch)
-        pitch_compensation_iterm = self.Ki_pitch * self.integrator_pitch 
+        if self.last_error_pitch is None:
+            self.last_error_pitch = error_pitch
+
+        #self.integrator_pitch += error_pitch * dt
+        # trapezoidal integration
+        self.integrator_pitch += 0.5 * self.Ki_pitch * dt * (error_pitch + self.last_error_pitch)
+
+        # Anti-windup: limit the integrator to prevent excessive buildup
+        u_unsat = pitch_compensation_pterm + self.integrator_pitch
+        u_sat   = max(self.pitch_compensation_min, min(u_unsat, self.pitch_compensation_max))
+        self.integrator_pitch += (u_sat - u_unsat) * self.kaw * dt
+        self.integrator_pitch = np.clip(self.integrator_pitch,self.integrator_pitch_min,self.integrator_pitch_max)
+
+        self.last_error_pitch = error_pitch # Store for next iteration
+        pitch_compensation_iterm = self.integrator_pitch
         
-        pitch_compensation = pitch_compensation_pterm + pitch_compensation_iterm
-        pitch_compensation= max(self.pitch_compensation_min, min(pitch_compensation, self.pitch_compensation_max))
+        pitch_compensation = u_sat
 
         # apply pitch compensation by moving the kuka in front or back of the UMR
         delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0]) 
@@ -822,8 +871,8 @@ class ClosedLoopRecorder:
         # yaw is controlled by the kuka rotating around the Z axis
 
         # pick the nearest reference point in the trajectory plus and look-ahead offset and find the yaw angle at the reference point
-        index_ahead = index_nearest_reference_point+self.look_ahead_offset
-        if index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
+        index_ahead = self.index_nearest_reference_point+self.look_ahead_offset
+        if self.index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
             index_ahead = len(self.trajectory_3d) - 1
         y_nearest_ref = self.trajectory_3d[index_ahead, 1]
         yaw_trajectory = self.trajectory_3d[index_ahead, 3]
@@ -841,15 +890,21 @@ class ClosedLoopRecorder:
         # Proportional and Integral control for yaw   
         yaw_compensation_pterm = self.Kp_yaw * error_yaw
 
-        self.integrator_yaw += error_yaw * dt
-        if self.integrator_yaw_min is not None:
-            self.integrator_yaw = max(self.integrator_yaw_min, self.integrator_yaw)
-        if self.integrator_yaw_max is not None:
-            self.integrator_yaw = min(self.integrator_yaw_max, self.integrator_yaw)
-        yaw_compensation_iterm = self.Ki_yaw * self.integrator_yaw
+        if self.last_error_yaw is None:
+            self.last_error_yaw = error_yaw
 
-        yaw_compensation = yaw_compensation_pterm + yaw_compensation_iterm
-        yaw_compensation= max(self.yaw_compensation_min, min(yaw_compensation, self.yaw_compensation_max))
+        #self.integrator_yaw += error_yaw * dt
+        self.integrator_yaw += 0.5 * self.Ki_yaw * dt * (error_yaw + self.last_error_yaw)
+
+        u_unsat = yaw_compensation_pterm + self.integrator_yaw
+        u_sat   = max(self.yaw_compensation_min, min(u_unsat, self.yaw_compensation_max))
+        self.integrator_yaw += (u_sat - u_unsat) * self.kaw * dt
+        self.integrator_yaw = np.clip(self.integrator_yaw, self.integrator_yaw_min,self.integrator_yaw_max)
+
+        self.last_error_yaw = error_yaw
+        yaw_compensation_iterm = self.integrator_yaw
+
+        yaw_compensation = u_sat
 
         # update the rotation of the kuka
         delta_rot = np.array([0, self.angle_1_filtered+yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
@@ -945,7 +1000,7 @@ class ClosedLoopRecorder:
 
         # Update the position of the kuka
         current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
-        start_pos = np.array([self.X_3d[0],self.Y_3d[-1],-self.Z_3d[0]])
+        start_pos = np.array([self.X_3d[0],self.Y_3d[0],-self.Z_3d[0]])
         delta_pos = current_pos-start_pos + delta_pos_pitch_compensation
 
         #rotate the rot and pos
@@ -1187,7 +1242,6 @@ if __name__ == "__main__":
     root.mainloop()
 
 
-    #TODO: update controller parameters JSON file
     #TODO: nadenken of we pitch ook een direction willen geven al vantevoren
     #TODO: heading plotten
-    #TODO: distance alleen y afhankelijk maken? anders kijkt die mogelijk terug?
+    #TODO: distance alleen y
