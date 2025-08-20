@@ -1247,3 +1247,4 @@ if __name__ == "__main__":
 
     #TODO: checken welke punt die naartoe wil anders oude functie erin poepen en kijken wat dat doet
     #TODO: check the nieuwe JSON file si vous plait
+    #test
