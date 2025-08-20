@@ -1190,4 +1190,4 @@ if __name__ == "__main__":
     #TODO: update controller parameters JSON file
     #TODO: nadenken of we pitch ook een direction willen geven al vantevoren
     #TODO: heading plotten
-    #TODO: distance alleen y
+    #TODO: distance alleen y afhankelijk maken? anders kijkt die mogelijk terug?
