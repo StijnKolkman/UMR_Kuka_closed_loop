@@ -75,6 +75,7 @@ class ClosedLoopRecorder:
         self.last_error_pitch = None  # Store last pitch error for integrator calculation
         self.kaw = 0.9  # anti-windup gain (tune 0.2–1.0)
         self.index_nearest_reference_point = None  # Index of the nearest reference point in the trajectory
+        self.pitch_feedforward_gain = 1/19.7920 # Gain to convert pitch setpoint to feedforward compensation (determined at 7.5cm distance above magnet. with matlab script 'pitch_feedforward'). It basically calculates the vector from the dipole equation
 
         #yaw settings
         self.look_ahead_offset = 0
@@ -127,6 +128,7 @@ class ClosedLoopRecorder:
 
         # Controller recording parameters
         self.pitch_setpoint_rec   = []
+        self.pitch_feedforward_rec = []
         self.current_pitch_rec    = []
         self.pitch_error_rec      = []
         self.pitch_comp_rec       = []
@@ -353,20 +355,25 @@ class ClosedLoopRecorder:
         self.pitch_error_label = ttk.Label(self.pitch_info, text="--- rad")
         self.pitch_error_label.grid(row=2, column=1, sticky="w")
 
-        # Row 3: P‐term
-        ttk.Label(self.pitch_info, text="P-term:").grid(row=3, column=0, sticky="w")
+        # Row 3: feedforward compensation
+        ttk.Label(self.pitch_info, text="Feedforward term:").grid(row=2, column=0, sticky="w")
+        self.pitch_feedforward_label = ttk.Label(self.pitch_info, text="--- dx")
+        self.pitch_feedforward_label.grid(row=3, column=1, sticky="w")
+
+        # Row 4: P‐term
+        ttk.Label(self.pitch_info, text="P-term:").grid(row=4, column=0, sticky="w")
         self.pitch_pterm_label = ttk.Label(self.pitch_info, text="---")
-        self.pitch_pterm_label.grid(row=3, column=1, sticky="w")
+        self.pitch_pterm_label.grid(row=4, column=1, sticky="w")
 
-        # Row 4: I-term
-        ttk.Label(self.pitch_info, text="I-term:").grid(row=4, column=0, sticky="w")
+        # Row 5: I-term
+        ttk.Label(self.pitch_info, text="I-term:").grid(row=5, column=0, sticky="w")
         self.pitch_iterm_label = ttk.Label(self.pitch_info, text="---")
-        self.pitch_iterm_label.grid(row=4, column=1, sticky="w")
+        self.pitch_iterm_label.grid(row=5, column=1, sticky="w")
 
-        # Row 5: total compensation
-        ttk.Label(self.pitch_info, text="Compensation:").grid(row=5, column=0, sticky="w")
+        # Row 6: total compensation
+        ttk.Label(self.pitch_info, text="Compensation:").grid(row=6, column=0, sticky="w")
         self.pitch_comp_label = ttk.Label(self.pitch_info, text="---")
-        self.pitch_comp_label.grid(row=5, column=1, sticky="w")
+        self.pitch_comp_label.grid(row=6, column=1, sticky="w")
 
         # Start the update loop and handle window‐close
         self.update_frame()
@@ -487,6 +494,7 @@ class ClosedLoopRecorder:
 
                 # ─ pitch channels ─
                 'pitch_setpoint'    : self.pitch_setpoint_rec,
+                'pitch_feedforward' : self.pitch_feedforward_rec,
                 'current_pitch'     : self.current_pitch_rec,
                 'pitch_error'       : self.pitch_error_rec,
                 'pitch_comp'        : self.pitch_comp_rec,
@@ -527,6 +535,7 @@ class ClosedLoopRecorder:
                 "pitch_compensation_limits": [self.pitch_compensation_min, self.pitch_compensation_max],
                 "last_error_pitch"       : self.last_error_pitch,
                 "kaw_pitch"              : self.kaw,
+                "pitch_feedforward_gain" : self.pitch_feedforward_gain,
 
                 # --- Yaw settings ---
                 "yaw_setpoint_gain"      : self.yaw_setpoint_gain,
@@ -843,6 +852,8 @@ class ClosedLoopRecorder:
         current_pitch = -self.angle_2_filtered
         error_pitch = pitch_setpoint - current_pitch
 
+        # get the feedforward pitch compensation based on the trajectory
+        pitch_feedforward = pitch_setpoint*self.pitch_feedforward_gain
         # Proportional and Integral control for pitch
         pitch_compensation_pterm = self.Kp_pitch * error_pitch 
 
@@ -854,7 +865,7 @@ class ClosedLoopRecorder:
         self.integrator_pitch += 0.5 * self.Ki_pitch * dt * (error_pitch + self.last_error_pitch)
 
         # Anti-windup: limit the integrator to prevent excessive buildup
-        u_unsat = pitch_compensation_pterm + self.integrator_pitch
+        u_unsat = pitch_compensation_pterm + self.integrator_pitch + pitch_feedforward
         u_sat   = max(self.pitch_compensation_min, min(u_unsat, self.pitch_compensation_max))
         self.integrator_pitch += (u_sat - u_unsat) * self.kaw * dt
         self.integrator_pitch = np.clip(self.integrator_pitch,self.integrator_pitch_min,self.integrator_pitch_max)
@@ -929,12 +940,13 @@ class ClosedLoopRecorder:
         self.current_yaw_label .config(text=f"{current_yaw:.3f} rad")
         self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
         self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
-        self.yaw_pterm_label  .config(text=f"{yaw_trajectory :.3f}")
-        self.yaw_iterm_label  .config(text=f"{yaw_correction :.3f}")
+        self.yaw_pterm_label  .config(text=f"{yaw_compensation_pterm :.3f}")
+        self.yaw_iterm_label  .config(text=f"{yaw_compensation_iterm :.3f}")
         self.yaw_comp_label   .config(text=f"{yaw_compensation:.3f}")
 
         self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
         self.pitch_setpoint_label.config(text=f"{pitch_setpoint:.3f} rad")
+        self.pitch_feedforward_label.config(text=f"{pitch_feedforward:.3f} rad")
         self.pitch_error_label   .config(text=f"{error_pitch:.3f} rad")
         self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
         self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
@@ -944,6 +956,7 @@ class ClosedLoopRecorder:
         if self.recording:
             # pitch channels
             self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.pitch_feedforward_rec.append(pitch_feedforward)
             self.current_pitch_rec.append(current_pitch)
             self.pitch_error_rec.append(error_pitch)
             self.pitch_comp_rec.append(pitch_compensation)
@@ -1037,6 +1050,7 @@ class ClosedLoopRecorder:
         if self.recording:
             # ───── pitch channels ─────────────────────────────
             self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.pitch_feedfoward_rec.append(pitch_feedforward) # this is not used in the straight controller
             self.current_pitch_rec.append(current_pitch)
             self.pitch_error_rec.append(error_pitch)
             self.pitch_comp_rec.append(pitch_compensation)
@@ -1124,6 +1138,7 @@ class ClosedLoopRecorder:
             if not self.controller_boolean: # if the controller is not active, we append zeros to the controller records
                 #pitch channels
                 self.pitch_setpoint_rec.append(0)
+                self.pitch_feedforward_rec.append(0)
                 self.current_pitch_rec.append(0)
                 self.pitch_error_rec.append(0)
                 self.pitch_comp_rec.append(0)
@@ -1242,9 +1257,5 @@ if __name__ == "__main__":
     root.mainloop()
 
 
-    #TODO: nadenken of we pitch ook een direction willen geven al vantevoren
-    #TODO: heading plotten
-
-    #TODO: checken welke punt die naartoe wil anders oude functie erin poepen en kijken wat dat doet
-    #TODO: check the nieuwe JSON file si vous plait
-    #test
+    #TODO: pitch ook een direction geven vantevoren
+    #TODO: check the pitch feedforward 
