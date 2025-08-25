@@ -68,8 +68,8 @@ class ClosedLoopRecorder:
         self.pitch_setpoint_gain = 49.09 # Simple linear map. 16mm error will cause a 45 degrees pitch 
         self.integrator_pitch = 0.0
         self.integrator_pitch_max = 1  # Maximum integrator value to prevent windup
-        self.integrator_pitch_min = -1 # was 0.5  # Minimum integrator value to prevent windup
-        self.Kp_pitch = 0.1 #0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
+        self.integrator_pitch_min = -0.5 # was 0.5  # Minimum integrator value to prevent windup
+        self.Kp_pitch = 0.05 #0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
         self.Ki_pitch = 0.005  # Integral gain for pitch control. i just made it small
         self.pitch_compensation_min = -0.01
         self.pitch_compensation_max = +0.01 #was 0.008
@@ -85,7 +85,7 @@ class ClosedLoopRecorder:
         self.integrator_yaw_max = 5  # Maximum integrator value to prevent windup
         self.integrator_yaw_min = -5 #was 0.5  # Minimum integrator value to prevent windup
         self.Kp_yaw = 1  # Proportional gain for yaw control --> this makes 30 degrees error into 30degrees input moving forward
-        self.Ki_yaw = 0.35 # was 0.1  # 
+        self.Ki_yaw = 0.1 # was 0.1  # 
         self.yaw_compensation_min = np.radians(-30) # Minimum yaw compensation in radians
         self.yaw_compensation_max = np.radians(30)  # Maximum yaw compensation in radians
         self.last_error_yaw = None  # Store last yaw error for integrator calculation
@@ -650,7 +650,7 @@ class ClosedLoopRecorder:
 
         x_box_2_px, y_box_2_px = self.box_2_x, self.box_2_y
         origin_box2_y_px = y_box_2_px + self.box_2_height_px
-        Z_box = self.cam2_to_box_distance
+        Z_box = self.cam2_to_box_distance   
         self.Z_shift = (origin_box2_y_px - self.cy_cam2) * Z_box / self.fy_cam2
         
         # now make the reference trajectory! linear or curved or sine or spline, many options... ---------------------------------------------------------------------------------------------
@@ -666,16 +666,27 @@ class ClosedLoopRecorder:
         elif self.trajectory_type == "sine":
             self.trajectory_3d = recorder_functions.generate_sine_trajectory_3d(
                 X0, Y0, Z0,
-                length_x=1.0,        # total distance to travel in X
+                length_x=0.15,        # total distance to travel in X
                 amplitude=0.01,       # peak Y deviation (sine amplitude)
-                wavelength=0.1,      # wavelength of the sine (in meters of X)
+                wavelength=0.1,      # wavelength of the sine (in meters of X)  
                 num_points=200)
             
         elif self.trajectory_type == "target_point": # spline to a target point that you need to select
-            current_pitch = -self.angle_2_filtered  # in radians
-            current_yaw   = self.angle_1_filtered  # in radians
+            ret, frame_1 = self.cap1.read()
+            _, _, angle_1, _, _ = recorder_functions.update_roi_center(frame_1, self.UMR_1_roi)
+
+            ret, frame_2 = self.cap2.read()
+            _, _, angle_2, _, _ = recorder_functions.update_roi_center(frame_2, self.UMR_2_roi)
+
+
+            current_pitch = -angle_2  # in radians
+            current_yaw   =  angle_1  # in radians
+            print(-angle_2)
+            print(angle_1)
             p0  = [X0, Y0, Z0] # start at current position
-            h0 = np.array([np.cos(current_pitch) * np.cos(current_yaw),np.cos(current_pitch) * np.sin(current_yaw),np.sin(current_pitch)]) # initial direction = current orientation
+            cp, sp = np.cos(current_pitch), np.sin(current_pitch)
+            cy, sy = np.cos(current_yaw),   np.sin(current_yaw)
+            h0 = np.array([cp*cy, -cp*sy, -sp]) # initial direction = current orientation
             p1  = self.pick_target()
             self.target_point = np.array(p1)  # save it for plotting
             h1  = [1.0, 0.0, 0.0]   # final direction = along X axis meaning pitch=0, yaw=0
@@ -1328,8 +1339,5 @@ if __name__ == "__main__":
     #TODO: check the pitch feedforward 
 
     #TODO: checken trajectory generator, gaat pitch en yaw de goeie kant op?
-        #TODO: kijken of de pick_target goed werkt
-        #TODO: eerste checken of de initial heading klopt met hoe de robot staat.
-        #TODO: kijken of het einde dan ook goed is
         #TODO: kijken of de yaw en pitch setpoints dan ook goed zijn
         #TODO: dan pas controller testen

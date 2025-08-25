@@ -177,9 +177,9 @@ def generate_quintic_spline_pose(p0, h0, p1, h1, Lout, Lin, num_points=200, equa
 
     # Orientation from tangent
     vx, vy, vz = vel[:,0], vel[:,1], vel[:,2]
-    yaw   = np.arctan2(vy, vx)
+    yaw   = -np.arctan2(vy, vx)
     horiz = np.sqrt(np.maximum(vx*vx + vy*vy, 1e-16))
-    pitch = np.arctan2(vz, horiz)
+    pitch = -np.arctan2(vz, horiz)
 
     x_m, y_m, z_m = pos[:,0], pos[:,1], pos[:,2]
     trajectory_3d = np.vstack((x_m, y_m, z_m, pitch, yaw)).T
