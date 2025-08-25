@@ -47,6 +47,7 @@ class ClosedLoopRecorder:
         self.kuka_new_rot = None
 
         # reference trajectory
+        self.trajectory_type = "target_point"  # Options: "linear", "curved", "sine", "spline", "target_point"
         self.trajectory_3d = None
 
         # Filtered angles
@@ -75,6 +76,7 @@ class ClosedLoopRecorder:
         self.last_error_pitch = None  # Store last pitch error for integrator calculation
         self.kaw = 0.95  # anti-windup gain (tune 0.2–1.0)
         self.index_nearest_reference_point = None  # Index of the nearest reference point in the trajectory
+        self.pitch_feedforward_gain = 1/19.7920 # Gain to convert pitch setpoint to feedforward compensation (determined at 7.5cm distance above magnet. with matlab script 'pitch_feedforward'). It basically calculates the vector from the dipole equation
 
         #yaw settings
         self.look_ahead_offset = 0
@@ -127,6 +129,7 @@ class ClosedLoopRecorder:
 
         # Controller recording parameters
         self.pitch_setpoint_rec   = []
+        self.pitch_feedforward_rec = []
         self.current_pitch_rec    = []
         self.pitch_error_rec      = []
         self.pitch_comp_rec       = []
@@ -158,7 +161,7 @@ class ClosedLoopRecorder:
 
         # ALL THE GUI RELATED SETTINGS
         self.window = window
-        self.window.title("Dual Camera Recorder")
+        self.window.title("Closed-loop UMR Tracker and Recorder")
         self.window.geometry("1024x700")
         self.window.minsize(800, 600)
         self.window.grid_columnconfigure((0,1,2), weight=1)
@@ -244,8 +247,10 @@ class ClosedLoopRecorder:
 
         self.calibration_button1 = ttk.Button(self.cal_frame, text="Calibrate Cam 1", command=self.toggle_calibration_cam1,style='ControllerOff.TButton')
         self.calibration_button1.grid(row=0, column=0, sticky="ew", pady=2)
+
         self.calibration_button2 = ttk.Button(self.cal_frame, text="Calibrate Cam 2", command=self.toggle_calibration_cam2,style='ControllerOff.TButton')
         self.calibration_button2.grid(row=1, column=0, sticky="ew", pady=2)
+
         self.calibrate_kuka_button = ttk.Button(self.cal_frame, text="Calibrate Kuka",command=self.calibrate_kuka,style='CalibrateKuka.TButton')
         self.calibrate_kuka_button.grid(row=2, column=0, sticky="ew", pady=4)
 
@@ -353,20 +358,25 @@ class ClosedLoopRecorder:
         self.pitch_error_label = ttk.Label(self.pitch_info, text="--- rad")
         self.pitch_error_label.grid(row=2, column=1, sticky="w")
 
-        # Row 3: P‐term
-        ttk.Label(self.pitch_info, text="P-term:").grid(row=3, column=0, sticky="w")
+        # Row 3: feedforward compensation
+        ttk.Label(self.pitch_info, text="Feedforward term:").grid(row=3, column=0, sticky="w")
+        self.pitch_feedforward_label = ttk.Label(self.pitch_info, text="--- dx")
+        self.pitch_feedforward_label.grid(row=3, column=1, sticky="w")
+
+        # Row 4: P‐term
+        ttk.Label(self.pitch_info, text="P-term:").grid(row=4, column=0, sticky="w")
         self.pitch_pterm_label = ttk.Label(self.pitch_info, text="---")
-        self.pitch_pterm_label.grid(row=3, column=1, sticky="w")
+        self.pitch_pterm_label.grid(row=4, column=1, sticky="w")
 
-        # Row 4: I-term
-        ttk.Label(self.pitch_info, text="I-term:").grid(row=4, column=0, sticky="w")
+        # Row 5: I-term
+        ttk.Label(self.pitch_info, text="I-term:").grid(row=5, column=0, sticky="w")
         self.pitch_iterm_label = ttk.Label(self.pitch_info, text="---")
-        self.pitch_iterm_label.grid(row=4, column=1, sticky="w")
+        self.pitch_iterm_label.grid(row=5, column=1, sticky="w")
 
-        # Row 5: total compensation
-        ttk.Label(self.pitch_info, text="Compensation:").grid(row=5, column=0, sticky="w")
+        # Row 6: total compensation
+        ttk.Label(self.pitch_info, text="Compensation:").grid(row=6, column=0, sticky="w")
         self.pitch_comp_label = ttk.Label(self.pitch_info, text="---")
-        self.pitch_comp_label.grid(row=5, column=1, sticky="w")
+        self.pitch_comp_label.grid(row=6, column=1, sticky="w")
 
         # Start the update loop and handle window‐close
         self.update_frame()
@@ -487,6 +497,7 @@ class ClosedLoopRecorder:
 
                 # ─ pitch channels ─
                 'pitch_setpoint'    : self.pitch_setpoint_rec,
+                'pitch_feedforward' : self.pitch_feedforward_rec,
                 'current_pitch'     : self.current_pitch_rec,
                 'pitch_error'       : self.pitch_error_rec,
                 'pitch_comp'        : self.pitch_comp_rec,
@@ -527,6 +538,7 @@ class ClosedLoopRecorder:
                 "pitch_compensation_limits": [self.pitch_compensation_min, self.pitch_compensation_max],
                 "last_error_pitch"       : self.last_error_pitch,
                 "kaw_pitch"              : self.kaw,
+                "pitch_feedforward_gain" : self.pitch_feedforward_gain,
 
                 # --- Yaw settings ---
                 "yaw_setpoint_gain"      : self.yaw_setpoint_gain,
@@ -640,21 +652,78 @@ class ClosedLoopRecorder:
         origin_box2_y_px = y_box_2_px + self.box_2_height_px
         Z_box = self.cam2_to_box_distance
         self.Z_shift = (origin_box2_y_px - self.cy_cam2) * Z_box / self.fy_cam2
+        
+        # now make the reference trajectory! linear or curved or sine or spline, many options... ---------------------------------------------------------------------------------------------
 
-        # now make the reference trajectory! linear or curved
         X0, Y0, Z0 = self.compute_initial_world_xyz()
-        #self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=50,direction_rad=0.0)
 
-        # alternatively:
-        #self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
-        self.trajectory_3d = recorder_functions.generate_sine_trajectory_3d(
-        X0, Y0, Z0,
-        length_x=0.15,        # total distance to travel in X
-        amplitude=0.01,       # peak Y deviation (sine amplitude)
-        wavelength=0.1,      # wavelength of the sine (in meters of X)
-        num_points=200
-    )
+        if self.trajectory_type == "linear":
+            self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=50,direction_rad=0.0)
+
+        elif self.trajectory_type == "curved":
+            self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
+
+        elif self.trajectory_type == "sine":
+            self.trajectory_3d = recorder_functions.generate_sine_trajectory_3d(
+                X0, Y0, Z0,
+                length_x=1.0,        # total distance to travel in X
+                amplitude=0.01,       # peak Y deviation (sine amplitude)
+                wavelength=0.1,      # wavelength of the sine (in meters of X)
+                num_points=200)
+            
+        elif self.trajectory_type == "target_point": # spline to a target point that you need to select
+            current_pitch = -self.angle_2_filtered  # in radians
+            current_yaw   = self.angle_1_filtered  # in radians
+            p0  = [X0, Y0, Z0] # start at current position
+            h0 = np.array([np.cos(current_pitch) * np.cos(current_yaw),np.cos(current_pitch) * np.sin(current_yaw),np.sin(current_pitch)]) # initial direction = current orientation
+            p1  = self.pick_target()
+            self.target_point = np.array(p1)  # save it for plotting
+            h1  = [1.0, 0.0, 0.0]   # final direction = along X axis meaning pitch=0, yaw=0
+            Lout, Lin = 0.05, 0.05  # how long the start and end straight pieces are
+            self.trajectory_3d = recorder_functions.generate_quintic_spline_pose(p0,h0,p1,h1,Lout,Lin)
+
+        # save the trajectory to CSV
         recorder_functions.save_trajectory_to_csv(self.trajectory_3d,self.filename_entry)
+
+    def pick_target(self):
+        """Ask user to click the target once in each camera and compute 3D world coords. Returns [X, Y, Z] in meters (world frame)."""
+        
+        # Let user select in cam1 and cam2
+        roi1 = recorder_functions.select_roi(self.cap1)
+        roi2 = recorder_functions.select_roi(self.cap2)
+
+        # ROI centers
+        x1,y1,w1,h1 = roi1; u1 = x1 + w1/2.0; v1 = y1 + h1/2.0
+        x2,y2,w2,h2 = roi2; u2 = x2 + w2/2.0; v2 = y2 + h2/2.0
+
+        # Undistort picks
+        p1u = cv2.undistortPoints(np.array([[[u1,v1]]],np.float32),self.camera_matrix1,self.dist_coeffs1,P=self.camera_matrix1)[0,0]
+        u1u,v1u = float(p1u[0]), float(p1u[1])
+
+        p2u = cv2.undistortPoints(np.array([[[u2,v2]]],np.float32),self.camera_matrix2,self.dist_coeffs2,P=self.camera_matrix2)[0,0]
+        u2u,v2u = float(p2u[0]), float(p2u[1])
+
+        # Geometry
+        fx1, fy1 = self.camera_matrix1[0,0], self.camera_matrix1[1,1]
+        cx1, cy1 = self.camera_matrix1[0,2], self.camera_matrix1[1,2]
+        fy2, cy2 = self.camera_matrix2[1,1], self.camera_matrix2[1,2]
+
+        d1, d2 = float(self.cam1_to_box_distance), float(self.cam2_to_box_distance)
+        X_shift, Y_shift, Z_shift = float(self.X_shift), float(self.Y_shift), float(self.Z_shift)
+
+        A1 = (u1u - cx1) / fx1
+        B1 = (v1u - cy1) / fy1
+        C2 = (v2u - cy2) / fy2
+
+        den = 1.0 - B1*C2
+        if abs(den) < 1e-9:
+            raise RuntimeError("Degenerate geometry (1 - B1*C2 ≈ 0). Try again.")
+
+        Y = (-B1*d1 + B1*C2*d2 + B1*Z_shift + Y_shift) / den
+        Z = -C2*d2 - C2*Y - Z_shift
+        X =  A1*(d1 + Z) - X_shift
+
+        return [float(X), float(Y), float(Z)]
 
     def update_trajectory_plot(self):
         """Update the 3D trajectory plot with measured path, planned path, and calibration box."""
@@ -686,6 +755,11 @@ class ClosedLoopRecorder:
             idx = int(np.clip(self.index_nearest_reference_point, 0, len(planned)-1))
             wp = planned[idx] * 1000.0
             self.ax3d.scatter(wp[0], wp[1], wp[2], color='red', s=60, marker='o', label="Nearest waypoint")
+
+        # highlight the target point if available
+        if getattr(self, "target_point", None) is not None:
+            tp = self.target_point * 1000.0  # convert to mm for consistency
+            self.ax3d.scatter(tp[0], tp[1], tp[2], color='green', s=80, marker='x', label="Target point")
 
         # calibration box dimensions (mm)
         w = self.real_box_width_cam1_mm      # width in mm
@@ -832,17 +906,20 @@ class ClosedLoopRecorder:
         #index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
         self.index_nearest_reference_point = recorder_functions.closest_point_on_polyline_3d(self.trajectory_3d[:, :3],[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
         z_nearest_ref = self.trajectory_3d[self.index_nearest_reference_point, 2]
-
+        pitch_trajectory = self.trajectory_3d[self.index_nearest_reference_point, 3]
 
         # calculate pitch setpoint based on the nearest reference point
         dz = self.Z_3d[-1] - z_nearest_ref
-        pitch_setpoint = self.pitch_setpoint_gain * dz 
+        pitch_correction = self.pitch_setpoint_gain * dz 
+        pitch_setpoint = pitch_trajectory + pitch_correction  # The desired pitch angle is the trajectory pitch plus the correction
         pitch_setpoint = max(min(pitch_setpoint,  math.pi/4), -math.pi/4) # limit the pitch setpoint to ±45 degrees
 
         # Get the error in pitch
         current_pitch = -self.angle_2_filtered
         error_pitch = pitch_setpoint - current_pitch
 
+        # get the feedforward pitch compensation based on the trajectory
+        pitch_feedforward = pitch_setpoint*self.pitch_feedforward_gain
         # Proportional and Integral control for pitch
         pitch_compensation_pterm = self.Kp_pitch * error_pitch 
 
@@ -854,7 +931,7 @@ class ClosedLoopRecorder:
         self.integrator_pitch += 0.5 * self.Ki_pitch * dt * (error_pitch + self.last_error_pitch)
 
         # Anti-windup: limit the integrator to prevent excessive buildup
-        u_unsat = pitch_compensation_pterm + self.integrator_pitch
+        u_unsat = pitch_compensation_pterm + self.integrator_pitch + pitch_feedforward
         u_sat   = max(self.pitch_compensation_min, min(u_unsat, self.pitch_compensation_max))
         self.integrator_pitch += (u_sat - u_unsat) * self.kaw * dt
         self.integrator_pitch = np.clip(self.integrator_pitch,self.integrator_pitch_min,self.integrator_pitch_max)
@@ -875,7 +952,7 @@ class ClosedLoopRecorder:
         if self.index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
             index_ahead = len(self.trajectory_3d) - 1
         y_nearest_ref = self.trajectory_3d[index_ahead, 1]
-        yaw_trajectory = self.trajectory_3d[index_ahead, 3]
+        yaw_trajectory = self.trajectory_3d[index_ahead, 4]
 
         # calculate the yaw correction based on the distance to the traje_ctory
         dy = self.Y_3d[-1] - y_nearest_ref
@@ -929,12 +1006,13 @@ class ClosedLoopRecorder:
         self.current_yaw_label .config(text=f"{current_yaw:.3f} rad")
         self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
         self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
-        self.yaw_pterm_label  .config(text=f"{yaw_trajectory :.3f}")
-        self.yaw_iterm_label  .config(text=f"{yaw_correction :.3f}")
+        self.yaw_pterm_label  .config(text=f"{yaw_compensation_pterm :.3f}")
+        self.yaw_iterm_label  .config(text=f"{yaw_compensation_iterm :.3f}")
         self.yaw_comp_label   .config(text=f"{yaw_compensation:.3f}")
 
         self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
         self.pitch_setpoint_label.config(text=f"{pitch_setpoint:.3f} rad")
+        self.pitch_feedforward_label.config(text=f"{pitch_feedforward:.3f} rad")
         self.pitch_error_label   .config(text=f"{error_pitch:.3f} rad")
         self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
         self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
@@ -944,6 +1022,7 @@ class ClosedLoopRecorder:
         if self.recording:
             # pitch channels
             self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.pitch_feedforward_rec.append(pitch_feedforward)
             self.current_pitch_rec.append(current_pitch)
             self.pitch_error_rec.append(error_pitch)
             self.pitch_comp_rec.append(pitch_compensation)
@@ -961,6 +1040,7 @@ class ClosedLoopRecorder:
 
     def straight_controller(self,time_controller):
         ''' old controller, only pitch compensation, no yaw compensation'''
+        '''
         if self.trajectory_3d is None or len(self.trajectory_3d) == 0:
             return
         
@@ -1037,6 +1117,7 @@ class ClosedLoopRecorder:
         if self.recording:
             # ───── pitch channels ─────────────────────────────
             self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.pitch_feedfoward_rec.append(pitch_feedforward) # this is not used in the straight controller
             self.current_pitch_rec.append(current_pitch)
             self.pitch_error_rec.append(error_pitch)
             self.pitch_comp_rec.append(pitch_compensation)
@@ -1050,7 +1131,7 @@ class ClosedLoopRecorder:
             self.yaw_pterm_rec.append(yaw_pterm)
             self.yaw_iterm_rec.append(yaw_iterm)
             self.yaw_comp_rec.append(delta_rot[1])      # the compensation you sent
-        return 
+        return '''
 
     def calibrate_kuka(self):
         """Store the current KUKA pose as the calibration reference."""
@@ -1124,6 +1205,7 @@ class ClosedLoopRecorder:
             if not self.controller_boolean: # if the controller is not active, we append zeros to the controller records
                 #pitch channels
                 self.pitch_setpoint_rec.append(0)
+                self.pitch_feedforward_rec.append(0)
                 self.current_pitch_rec.append(0)
                 self.pitch_error_rec.append(0)
                 self.pitch_comp_rec.append(0)
@@ -1242,9 +1324,12 @@ if __name__ == "__main__":
     root.mainloop()
 
 
-    #TODO: nadenken of we pitch ook een direction willen geven al vantevoren
-    #TODO: heading plotten
+    #TODO: checken pitch setpoint, die komt vanaf de trajectory maar gaat die de goeie kant op?
+    #TODO: check the pitch feedforward 
 
-    #TODO: checken welke punt die naartoe wil anders oude functie erin poepen en kijken wat dat doet
-    #TODO: check the nieuwe JSON file si vous plait
-    #test
+    #TODO: checken trajectory generator, gaat pitch en yaw de goeie kant op?
+        #TODO: kijken of de pick_target goed werkt
+        #TODO: eerste checken of de initial heading klopt met hoe de robot staat.
+        #TODO: kijken of het einde dan ook goed is
+        #TODO: kijken of de yaw en pitch setpoints dan ook goed zijn
+        #TODO: dan pas controller testen
