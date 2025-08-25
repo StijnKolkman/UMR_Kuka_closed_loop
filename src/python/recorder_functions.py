@@ -21,10 +21,12 @@ def generate_relative_linear_trajectory_3d(X0, Y0, Z0, length_m: float = 0.1, nu
     x_vals = np.linspace(X0, X1, num_points)
     y_vals = np.linspace(Y0, Y1, num_points)
     z_vals = np.full(num_points, Z0, dtype=np.float64)
-    theta_vals = np.full(num_points, direction_rad, dtype=np.float64)
+    psi_vals = np.full(num_points, direction_rad, dtype=np.float64) # yaw is psi
+    theta_vals = np.zeros(num_points, dtype=np.float64)  # theta is pitch is zero for flat trajectory
 
-    # Stack into (num_points × 4): [x_m, y_m, z_m, θ_rad]
-    trajectory_3d = np.vstack((x_vals, y_vals, z_vals, theta_vals)).T
+
+    # Stack into (num_points × 5): [x_m, y_m, z_m, pitch_rad, yaw_rad]
+    trajectory_3d = np.vstack((x_vals, y_vals, z_vals, theta_vals,psi_vals)).T
     return trajectory_3d
 
 def generate_curved_trajectory_3d(
@@ -36,7 +38,7 @@ def generate_curved_trajectory_3d(
     turn_left=True
 ):
     """3D circular-arc trajectory in XY (Z constant).
-    Returns (N,4): [x, y, z, theta], with theta tangent to the path.
+    Returns (N,5): [x, y, z, pitch, yaw], with theta tangent to the path.
     """
 
     psi0 = float(direction_rad)
@@ -51,7 +53,7 @@ def generate_curved_trajectory_3d(
         Xs = Xc + R * np.sin(psi0 + phi)
         Ys = Yc - R * np.cos(psi0 + phi)
         # tangent heading increases with phi
-        theta = psi0 - phi
+        psi = psi0 - phi
     else:
         # center is to the right of the heading
         Xc = X0 + R * math.sin(psi0)
@@ -60,13 +62,17 @@ def generate_curved_trajectory_3d(
         Xs = Xc - R * np.sin(psi0 - phi)
         Ys = Yc + R * np.cos(psi0 - phi)
         # tangent heading decreases with phi
-        theta = psi0 + phi
+        psi = psi0 + phi
 
-    # ensure theta in [0, 2π)
-    theta = (theta + math.pi) % (2.0 * math.pi) - math.pi
+    # ensure yaw in [-pi, pi)
+    psi = (psi + math.pi) % (2.0 * math.pi) - math.pi
 
+    # 
+    theta = np.zeros(num_points, dtype=np.float64)
+
+    # constant Z
     Zs = np.full(num_points, Z0, dtype=np.float64)
-    trajectory_3d = np.vstack((Xs, Ys, Zs, theta)).T
+    trajectory_3d = np.vstack((Xs, Ys, Zs, theta, psi)).T
     return trajectory_3d
 
 def generate_sine_trajectory_3d(
@@ -80,8 +86,8 @@ def generate_sine_trajectory_3d(
     Generates a 3D sine-wave trajectory in the XY plane.
     X increases linearly.
     Y = amplitude * sin(2π * X / wavelength)
-    theta is the tangent angle of the curve (atan(dy/dx)).
-    Returns (N,4): [x, y, z, theta]
+    psi is the tangent angle of the curve (atan(dy/dx)).
+    Returns (N,5): [x, y, z, pitch, yaw]
     """
 
     Xs = np.linspace(X0, X0 + length_x, num_points)
@@ -94,19 +100,97 @@ def generate_sine_trajectory_3d(
     dYdX = (2*np.pi / wavelength) * amplitude * np.cos(2*np.pi*(Xs - X0) / wavelength)
 
     # tangent heading
-    theta = -np.arctan2(dYdX, 1.0)
+    psi = -np.arctan2(dYdX, 1.0)
+    theta = np.zeros(num_points, dtype=np.float64)  # pitch is zero for flat trajectory
 
-    trajectory_3d = np.vstack((Xs, Ys, Zs, theta)).T
+    trajectory_3d = np.vstack((Xs, Ys, Zs, theta, psi)).T
     return trajectory_3d
 
+def generate_quintic_spline_pose(p0, h0, p1, h1, Lout, Lin, num_points=200, equal_arclen=True):
+    """
+    Quintic 3D spline with endpoint headings and zero curvature at both ends.
+    r(t) = a0+a1 t+a2 t^2+a3 t^3+a4 t^4+a5 t^5,  t in [0,1]
 
+    Constraints:
+      r(0)=p0, r'(0)=Lout*h0, r''(0)=0
+      r(1)=p1, r'(1)=Lin *h1, r''(1)=0
+
+    Returns:
+      x_m, y_m, z_m, pitch_rad, yaw_rad (each length num_points)
+    """
+
+    # Ensure arrays
+    p0 = np.asarray(p0, dtype=float).reshape(3)
+    p1 = np.asarray(p1, dtype=float).reshape(3)
+    h0 = np.asarray(h0, dtype=float).reshape(3)
+    h1 = np.asarray(h1, dtype=float).reshape(3)
+
+    # Normalize headings
+    def unit(v):
+        n = np.linalg.norm(v)
+        return v/n if n > 0 else v
+    h0 = unit(h0)
+    h1 = unit(h1)
+
+    # Endpoint derivatives
+    v0 = Lout * h0
+    v1 = Lin  * h1
+
+    # Known coefficients
+    a0 = p0
+    a1 = v0
+    a2 = np.zeros(3)
+
+    # Solve for a3..a5
+    M = np.array([[1, 1, 1],
+                  [3, 4, 5],
+                  [6,12,20]], dtype=float)
+    rhs = np.vstack([
+        (p1 - (a0 + a1 + a2)),
+        (v1 - (a1 + 2*a2)),
+        np.zeros(3)
+    ])
+    A = np.linalg.solve(M, rhs)
+    a3, a4, a5 = A[0,:], A[1,:], A[2,:]
+
+    coeffs = np.vstack([a0, a1, a2, a3, a4, a5])  # (6,3)
+
+    # Parameter samples. Makes sure that all the points are evenly spaced along the path (not along the parameter space) if equal_arclen is True.
+    if equal_arclen:
+        t_dense = np.linspace(0,1,max(4000,20*num_points))
+        T_dense = np.stack([np.ones_like(t_dense), t_dense, t_dense**2,
+                            t_dense**3, t_dense**4, t_dense**5], axis=-1)
+        pos_dense = T_dense @ coeffs
+        seg = np.linalg.norm(np.diff(pos_dense,axis=0),axis=1)
+        s = np.concatenate([[0], np.cumsum(seg)])
+        s /= s[-1] if s[-1] > 0 else 1.0
+        t = np.interp(np.linspace(0,1,num_points), s, t_dense)
+    else:
+        t = np.linspace(0,1,num_points)
+
+    # Evaluate pos + vel
+    T  = np.stack([np.ones_like(t), t, t**2, t**3, t**4, t**5], axis=-1)
+    dT = np.stack([np.zeros_like(t), np.ones_like(t), 2*t, 3*t**2,
+                   4*t**3, 5*t**4], axis=-1)
+    pos = T @ coeffs
+    vel = dT @ coeffs
+
+    # Orientation from tangent
+    vx, vy, vz = vel[:,0], vel[:,1], vel[:,2]
+    yaw   = np.arctan2(vy, vx)
+    horiz = np.sqrt(np.maximum(vx*vx + vy*vy, 1e-16))
+    pitch = np.arctan2(vz, horiz)
+
+    x_m, y_m, z_m = pos[:,0], pos[:,1], pos[:,2]
+    trajectory_3d = np.vstack((x_m, y_m, z_m, pitch, yaw)).T
+    return trajectory_3d
 
 def save_trajectory_to_csv(trajectory_3d, filename_entry):
-    """Save a (N×4) trajectory array to a CSV file."""
+    """Save a (N×5) trajectory array to a CSV file."""
 
     # validate trajectory shape
-    if not isinstance(trajectory_3d, np.ndarray) or trajectory_3d.ndim != 2 or trajectory_3d.shape[1] != 4:
-        raise ValueError(f"Invalid trajectory shape: expected (N, 4), got {trajectory_3d.shape}")
+    if not isinstance(trajectory_3d, np.ndarray) or trajectory_3d.ndim != 2 or trajectory_3d.shape[1] != 5:
+        raise ValueError(f"Invalid trajectory shape: expected (N, 5), got {trajectory_3d.shape}")
 
     # get filename from entry or use default
     filename = filename_entry.get().strip() or "recording"
@@ -117,7 +201,7 @@ def save_trajectory_to_csv(trajectory_3d, filename_entry):
     output_file_path = os.path.join(output_dir, f"{filename}_reference_trajectory.csv")
 
     # write CSV
-    header = ['x_m', 'y_m', 'z_m', 'theta_rad']
+    header = ['x_m', 'y_m', 'z_m', 'pitch_rad', 'yaw_rad']
     with open(output_file_path, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(header)
@@ -136,7 +220,7 @@ def camera_to_box_distance(L_real_mm, L_pixels, focal_length_px):
     return D_camera_box
 
 def select_roi(cap):
-    """OpenCV helper to select a region of interest (ROI) from the first video frame."""
+    """OpenCV helper to select a region of interest (ROI) from the video frame."""
 
     ret, frame = cap.read()
     if not ret:
