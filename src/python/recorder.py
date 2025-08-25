@@ -70,10 +70,10 @@ class ClosedLoopRecorder:
         self.integrator_pitch_min = -1 # was 0.5  # Minimum integrator value to prevent windup
         self.Kp_pitch = 0.1 #0.0256  # Proportional gain for pitch control --> this makes 45 degrees error into 0.02m moving forward
         self.Ki_pitch = 0.005  # Integral gain for pitch control. i just made it small
-        self.pitch_compensation_min = -0.015
-        self.pitch_compensation_max = +0.015 #was 0.008
+        self.pitch_compensation_min = -0.01
+        self.pitch_compensation_max = +0.01 #was 0.008
         self.last_error_pitch = None  # Store last pitch error for integrator calculation
-        self.kaw = 0.9  # anti-windup gain (tune 0.2–1.0)
+        self.kaw = 0.95  # anti-windup gain (tune 0.2–1.0)
         self.index_nearest_reference_point = None  # Index of the nearest reference point in the trajectory
 
         #yaw settings
@@ -83,7 +83,7 @@ class ClosedLoopRecorder:
         self.integrator_yaw_max = 5  # Maximum integrator value to prevent windup
         self.integrator_yaw_min = -5 #was 0.5  # Minimum integrator value to prevent windup
         self.Kp_yaw = 1  # Proportional gain for yaw control --> this makes 30 degrees error into 30degrees input moving forward
-        self.Ki_yaw = 0.2 # was 0.1  # 
+        self.Ki_yaw = 0.35 # was 0.1  # 
         self.yaw_compensation_min = np.radians(-30) # Minimum yaw compensation in radians
         self.yaw_compensation_max = np.radians(30)  # Maximum yaw compensation in radians
         self.last_error_yaw = None  # Store last yaw error for integrator calculation
@@ -649,7 +649,7 @@ class ClosedLoopRecorder:
         #self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
         self.trajectory_3d = recorder_functions.generate_sine_trajectory_3d(
         X0, Y0, Z0,
-        length_x=1.0,        # total distance to travel in X
+        length_x=0.15,        # total distance to travel in X
         amplitude=0.01,       # peak Y deviation (sine amplitude)
         wavelength=0.1,      # wavelength of the sine (in meters of X)
         num_points=200
@@ -830,7 +830,7 @@ class ClosedLoopRecorder:
 
         # pick the nearest reference point in the trajectory
         #index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
-        self.index_nearest_reference_point = recorder_functions.closest_point_on_polyline_3d(self.trajectory_3d,[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
+        self.index_nearest_reference_point = recorder_functions.closest_point_on_polyline_3d(self.trajectory_3d[:, :3],[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
         z_nearest_ref = self.trajectory_3d[self.index_nearest_reference_point, 2]
 
 
