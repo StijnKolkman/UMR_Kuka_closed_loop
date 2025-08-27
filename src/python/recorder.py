@@ -47,7 +47,7 @@ class ClosedLoopRecorder:
         self.kuka_new_rot = None
 
         # reference trajectory
-        self.trajectory_type = "target_point"  # Options: "linear", "curved", "sine", "spline", "target_point"
+        self.trajectory_type = "linear"  # Options: "linear", "curved", "sine", "spline", "target_point"
         self.trajectory_3d = None
 
         # Filtered angles
@@ -84,8 +84,8 @@ class ClosedLoopRecorder:
         self.integrator_yaw = 0.0
         self.integrator_yaw_max = 5  # Maximum integrator value to prevent windup
         self.integrator_yaw_min = -5 #was 0.5  # Minimum integrator value to prevent windup
-        self.Kp_yaw = 1  # Proportional gain for yaw control --> this makes 30 degrees error into 30degrees input moving forward
-        self.Ki_yaw = 0.1 # was 0.1  # 
+        self.Kp_yaw = 2  # Proportional gain for yaw control --> this makes 30 degrees error into 30degrees input moving forward
+        self.Ki_yaw = 0.04 # was 0.1  # 
         self.yaw_compensation_min = np.radians(-30) # Minimum yaw compensation in radians
         self.yaw_compensation_max = np.radians(30)  # Maximum yaw compensation in radians
         self.last_error_yaw = None  # Store last yaw error for integrator calculation
@@ -114,7 +114,7 @@ class ClosedLoopRecorder:
         self.real_box_width_cam1_mm = 108
         self.real_box_height_cam1_mm = 56
         self.real_box_width_cam2_mm = 108
-        self.real_box_height_cam2_mm = 32
+        self.real_box_height_cam2_mm = 28
         
         # recording states 
         self.recording = False
@@ -191,8 +191,8 @@ class ClosedLoopRecorder:
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
         #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -658,7 +658,7 @@ class ClosedLoopRecorder:
         X0, Y0, Z0 = self.compute_initial_world_xyz()
 
         if self.trajectory_type == "linear":
-            self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=50,direction_rad=0.0)
+            self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=200,direction_rad=0.0)
 
         elif self.trajectory_type == "curved":
             self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
