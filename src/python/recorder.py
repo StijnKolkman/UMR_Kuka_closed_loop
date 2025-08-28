@@ -62,6 +62,7 @@ class ClosedLoopRecorder:
         self.motor_boolean = False
         self.offset_angle = 0.0
         self.interval_time = 0.0
+        self.start_time_controller = None
 
         #pitch settings
         self.last_time_controller = None
@@ -1049,6 +1050,171 @@ class ClosedLoopRecorder:
             self.yaw_comp_rec.append(yaw_compensation) 
         return 
     
+    def controller_curve_experiment(self,time_controller):
+        """Main closed-loop controller: computes pitch/yaw compensation and sends pose to KUKA."""
+        if self.trajectory_3d is None or len(self.trajectory_3d) == 0:
+            return
+        
+        # TIME UPDATE -----------------------------------------------------------------------------
+        if self.last_time_controller is None:
+            self.last_time_controller = time_controller
+            return
+        else:
+            dt_raw = time_controller - self.last_time_controller
+            self.last_time_controller = time_controller
+
+        if self.start_time_controller is None:
+            self.start_time_controller = time_controller
+
+        # make dt robust against zero and outliers
+        DT_MIN = 1e-3      # 1 ms lower bound (avoid zero)
+        DT_MAX = 0.10      # 100 ms upper bound
+
+        # Clip dt into a safe range
+        dt = min(max(float(dt_raw), DT_MIN), DT_MAX)
+        
+        # PITCH CONTROLLER-------------------------------------------------------------------------
+        # pitch is controlled by the kuka moving in front or back of the umr
+
+        # pick the nearest reference point in the trajectory
+        #index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
+        self.index_nearest_reference_point = recorder_functions.closest_point_on_polyline_3d(self.trajectory_3d[:, :3],[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
+        z_nearest_ref = self.trajectory_3d[self.index_nearest_reference_point, 2]
+        pitch_trajectory = self.trajectory_3d[self.index_nearest_reference_point, 3]
+
+        # calculate pitch setpoint based on the nearest reference point
+        dz = self.Z_3d[-1] - z_nearest_ref
+        pitch_correction = self.pitch_setpoint_gain * dz 
+        pitch_setpoint = pitch_trajectory + pitch_correction  # The desired pitch angle is the trajectory pitch plus the correction
+        pitch_setpoint = max(min(pitch_setpoint,  math.pi/4), -math.pi/4) # limit the pitch setpoint to ±45 degrees
+
+        # Get the error in pitch
+        current_pitch = -self.angle_2_filtered
+        error_pitch = pitch_setpoint - current_pitch
+
+        # get the feedforward pitch compensation based on the trajectory
+        pitch_feedforward = pitch_setpoint*self.pitch_feedforward_gain
+        # Proportional and Integral control for pitch
+        pitch_compensation_pterm = self.Kp_pitch * error_pitch 
+
+        if self.last_error_pitch is None:
+            self.last_error_pitch = error_pitch
+
+        #self.integrator_pitch += error_pitch * dt
+        # trapezoidal integration
+        self.integrator_pitch += 0.5 * self.Ki_pitch * dt * (error_pitch + self.last_error_pitch)
+
+        # Anti-windup: limit the integrator to prevent excessive buildup
+        u_unsat = pitch_compensation_pterm + self.integrator_pitch + pitch_feedforward
+        u_sat   = max(self.pitch_compensation_min, min(u_unsat, self.pitch_compensation_max))
+        self.integrator_pitch += (u_sat - u_unsat) * self.kaw * dt
+        self.integrator_pitch = np.clip(self.integrator_pitch,self.integrator_pitch_min,self.integrator_pitch_max)
+
+        self.last_error_pitch = error_pitch # Store for next iteration
+        pitch_compensation_iterm = self.integrator_pitch
+        
+        pitch_compensation = u_sat
+
+        # apply pitch compensation by moving the kuka in front or back of the UMR
+        delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0]) 
+
+        # YAW Controller--------------------------------------------------------------------------
+        # yaw is controlled by the kuka rotating around the Z axis
+
+        # pick the nearest reference point in the trajectory plus and look-ahead offset and find the yaw angle at the reference point
+        index_ahead = self.index_nearest_reference_point+self.look_ahead_offset
+        if self.index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
+            index_ahead = len(self.trajectory_3d) - 1
+        y_nearest_ref = self.trajectory_3d[index_ahead, 1]
+        yaw_trajectory = self.trajectory_3d[index_ahead, 4]
+
+        # calculate the yaw correction based on the distance to the traje_ctory
+        dy = self.Y_3d[-1] - y_nearest_ref
+        yaw_correction = self.yaw_setpoint_gain * dy
+        yaw_setpoint = yaw_trajectory + yaw_correction  #The desired yaw angle is the trajectory yaw plus the correction
+        yaw_setpoint = max(min(yaw_setpoint,  math.pi/2), -math.pi/2) # limit the yaw setpoint to ±90 degrees 
+
+        # Get the error in yaw
+        current_yaw = self.angle_1_filtered  # Assuming angle_1 is the yaw angle
+        error_yaw = yaw_setpoint - current_yaw
+
+        # Proportional and Integral control for yaw   
+        yaw_compensation_pterm = self.Kp_yaw * error_yaw
+
+        if self.last_error_yaw is None:
+            self.last_error_yaw = error_yaw
+
+        #self.integrator_yaw += error_yaw * dt
+        self.integrator_yaw += 0.5 * self.Ki_yaw * dt * (error_yaw + self.last_error_yaw)
+
+        u_unsat = yaw_compensation_pterm + self.integrator_yaw
+        u_sat   = max(self.yaw_compensation_min, min(u_unsat, self.yaw_compensation_max))
+        self.integrator_yaw += (u_sat - u_unsat) * self.kaw * dt
+        self.integrator_yaw = np.clip(self.integrator_yaw, self.integrator_yaw_min,self.integrator_yaw_max)
+
+        self.last_error_yaw = error_yaw
+        yaw_compensation_iterm = self.integrator_yaw
+
+        yaw_compensation = u_sat
+
+        if time_controller - self.start_time_controller > 60:
+            yaw_compensation = np.radians(30)  # after 1000 seconds, stop yaw compensation to see effect
+
+        # update the rotation of the kuka
+        delta_rot = np.array([0, self.angle_1_filtered+yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
+
+        # KUKA POSITION UPDATE -----------------------------------------------------------------
+        current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
+        start_pos = np.array([self.X_3d[0],self.Y_3d[0],-self.Z_3d[0]])
+        delta_pos = current_pos-start_pos + delta_pos_pitch_compensation
+
+        #rotate the rot and pos
+        delta_pos, delta_rot = recorder_functions.transform_pose(self.R_BoxToKuka,delta_pos, delta_rot)
+
+        #apply to calibrated start position
+        self.kuka_new_pos = self.kuka_start_pos+delta_pos
+        self.kuka_new_rot = self.kuka_start_rot+delta_rot
+
+        #send the new position and rotation
+        self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
+
+
+        # GUI UPDATE ----------------------------------------------------------------------------
+        self.current_yaw_label .config(text=f"{current_yaw:.3f} rad")
+        self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
+        self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
+        self.yaw_pterm_label  .config(text=f"{yaw_compensation_pterm :.3f}")
+        self.yaw_iterm_label  .config(text=f"{yaw_compensation_iterm :.3f}")
+        self.yaw_comp_label   .config(text=f"{yaw_compensation:.3f}")
+
+        self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
+        self.pitch_setpoint_label.config(text=f"{pitch_setpoint:.3f} rad")
+        self.pitch_feedforward_label.config(text=f"{pitch_feedforward:.3f} rad")
+        self.pitch_error_label   .config(text=f"{error_pitch:.3f} rad")
+        self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
+        self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
+        self.pitch_comp_label    .config(text=f"{pitch_compensation:.3f}")
+
+        # RECORDING UPDATE------------------------------------------------------------------------
+        if self.recording:
+            # pitch channels
+            self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.pitch_feedforward_rec.append(pitch_feedforward)
+            self.current_pitch_rec.append(current_pitch)
+            self.pitch_error_rec.append(error_pitch)
+            self.pitch_comp_rec.append(pitch_compensation)
+            self.pitch_comp_iterm_rec.append(pitch_compensation_iterm)
+            self.pitch_comp_pterm_rec.append(pitch_compensation_pterm)
+
+            # yaw channels
+            self.current_yaw_rec.append(current_yaw)  
+            self.yaw_setpoint_rec.append(yaw_setpoint)
+            self.yaw_error_rec.append(error_yaw)
+            self.yaw_pterm_rec.append(yaw_compensation_pterm)
+            self.yaw_iterm_rec.append(yaw_compensation_iterm)
+            self.yaw_comp_rec.append(yaw_compensation) 
+        return 
+    
     def calibrate_kuka(self):
         """Store the current KUKA pose as the calibration reference."""
         self.kuka_start_pos,self.kuka_start_rot = self.get_current_pose()
@@ -1198,7 +1364,7 @@ class ClosedLoopRecorder:
                 print("First turn the reconstructor on")
                 return
             time_controller = time.perf_counter()
-            self.controller(time_controller) # or self.straight_controller(time_controller) for straight controller
+            self.controller_curve_experiment(time_controller) # or self.straight_controller(time_controller) for straight controller
 
         self.window.after(10, self.update_frame)
 
