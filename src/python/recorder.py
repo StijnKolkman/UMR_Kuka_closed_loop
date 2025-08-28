@@ -47,7 +47,7 @@ class ClosedLoopRecorder:
         self.kuka_new_rot = None
 
         # reference trajectory
-        self.trajectory_type = "curved"  # Options: "linear", "curved", "sine", "spline", "target_point"
+        self.trajectory_type = "linear"  # Options: "linear", "curved", "sine", "spline", "target_point"
         self.trajectory_3d = None
 
         # Filtered angles
