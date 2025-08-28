@@ -47,7 +47,7 @@ class ClosedLoopRecorder:
         self.kuka_new_rot = None
 
         # reference trajectory
-        self.trajectory_type = "linear"  # Options: "linear", "curved", "sine", "spline", "target_point"
+        self.trajectory_type = "curved"  # Options: "linear", "curved", "sine", "spline", "target_point"
         self.trajectory_3d = None
 
         # Filtered angles
@@ -191,8 +191,8 @@ class ClosedLoopRecorder:
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
         #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -661,7 +661,7 @@ class ClosedLoopRecorder:
             self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=200,direction_rad=0.0)
 
         elif self.trajectory_type == "curved":
-            self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=50,direction_rad=0.0,turn_left=True)
+            self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=200,direction_rad=0.0,turn_left=False)
 
         elif self.trajectory_type == "sine":
             self.trajectory_3d = recorder_functions.generate_sine_trajectory_3d(
