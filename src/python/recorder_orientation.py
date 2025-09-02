@@ -646,8 +646,8 @@ class ClosedLoopRecorder:
         origin_box1_x_px = x_box_1_px + self.box_1_width_px
         origin_box1_y_px = y_box_1_px
         Z_box = self.cam1_to_box_distance
-        self.X_shift = (origin_box1_x_px - self.cx_cam1) * Z_box / self.fx_cam1
-        self.Y_shift = (origin_box1_y_px - self.cy_cam1) * Z_box / self.fy_cam1
+        self.X_shift = -(origin_box1_x_px - self.cx_cam1) * Z_box / self.fx_cam1
+        self.Y_shift = -(origin_box1_y_px - self.cy_cam1) * Z_box / self.fy_cam1
 
         x_box_2_px, y_box_2_px = self.box_2_x, self.box_2_y
         origin_box2_y_px = y_box_2_px + self.box_2_height_px
@@ -861,13 +861,13 @@ class ClosedLoopRecorder:
 
         # Calculate position relative to focal point using pinhole model 
         X_3d_relative = -(self.UMR_1_center_x - self.cx_cam1)*self.Z1[-1]/self.fx_cam1
-        Y_3d_relative = -((self.UMR_1_center_y - self.cy_cam1)*self.Z1[-1]/self.fy_cam1)
-        Z_3d_relative = ((self.UMR_2_center_y - self.cy_cam2)*self.Z2[-1]/self.fy_cam2)
+        Y_3d_relative = -(self.UMR_1_center_y - self.cy_cam1)*self.Z1[-1]/self.fy_cam1
+        Z_3d_relative = -(self.UMR_2_center_y - self.cy_cam2)*self.Z2[-1]/self.fy_cam2
 
         # apply world-frame shifts/signs
         X_3d_next = (X_3d_relative-self.X_shift)
         Y_3d_next = (-Y_3d_relative+self.Y_shift)
-        Z_3d_next = -(Z_3d_relative+self.Z_shift)
+        Z_3d_next = (Z_3d_relative+self.Z_shift)
 
         # Append the new 3D coordinates to the lists
         self.X_3d.append(X_3d_next)
@@ -1115,6 +1115,9 @@ class ClosedLoopRecorder:
         
         pitch_compensation = u_sat
 
+        if time_controller - self.start_time_controller > 60:
+            pitch_compensation = 0  # after 60 seconds, stop pitch compensation
+
         # apply pitch compensation by moving the kuka in front or back of the UMR
         delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0]) 
 
@@ -1158,7 +1161,7 @@ class ClosedLoopRecorder:
         yaw_compensation = u_sat
 
         if time_controller - self.start_time_controller > 60:
-            yaw_compensation = np.radians(30)  # after 1000 seconds, stop yaw compensation to see effect
+            yaw_compensation = np.radians(-20)  # after 1000 seconds, stop yaw compensation to see effect
 
         # update the rotation of the kuka
         delta_rot = np.array([0, self.angle_1_filtered+yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
@@ -1240,24 +1243,15 @@ class ClosedLoopRecorder:
     def compute_initial_world_xyz(self):
         """Compute the initial world-frame (X0, Y0, Z0) position of the UMR."""
 
-        u, v = self.umr_1_center_x, self.umr_1_center_y
-        
-        # depth from cam2 measurement (back-projection)
-        Z1 = (self.UMR_2_center_y - self.cy_cam2) * self.Z2[-1] / self.fy_cam2
-
         # back-project into cam1 coordinates
-        X_rel = -(u - self.cx_cam1) * self.Z1_initial / self.fx_cam1
-        Y_rel = -(v - self.cy_cam1) * self.Z1_initial / self.fy_cam1
-        Z_rel = Z1
-
-        # Shift into “box‐corner” world frame in X and Y
-        X0 = X_rel - self.X_shift
-        Y0 = -(Y_rel - self.Y_shift)
+        X_rel = -(self.umr_1_center_x- self.cx_cam1) * self.Z1_initial / self.fx_cam1
+        Y_rel = -(self.umr_1_center_y - self.cy_cam1) * self.Z1_initial / self.fy_cam1
+        Z_rel = -(self.UMR_2_center_y - self.cy_cam2) * self.Z2[-1] / self.fy_cam2
 
         # shift into box-corner world frame
         X0 = X_rel - self.X_shift
-        Y0 = -(Y_rel - self.Y_shift)
-        Z0 = -(Z_rel + self.Z_shift)
+        Y0 = -Y_rel + self.Y_shift
+        Z0 = Z_rel + self.Z_shift
 
         return X0, Y0, Z0
     
@@ -1405,10 +1399,3 @@ if __name__ == "__main__":
     app = ClosedLoopRecorder(root)
     root.mainloop()
 
-
-    #TODO: checken pitch setpoint, die komt vanaf de trajectory maar gaat die de goeie kant op?
-    #TODO: check the pitch feedforward 
-
-    #TODO: checken trajectory generator, gaat pitch en yaw de goeie kant op?
-        #TODO: kijken of de yaw en pitch setpoints dan ook goed zijn
-        #TODO: dan pas controller testen
