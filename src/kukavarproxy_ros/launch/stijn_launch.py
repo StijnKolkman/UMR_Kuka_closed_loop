@@ -7,7 +7,7 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=[
                 'python3',
-                'src/python/recorder.py' 
+                'src/python/recorder_orientation.py' 
             ],
             output='screen'
         ),

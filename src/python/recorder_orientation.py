@@ -629,9 +629,9 @@ class ClosedLoopRecorder:
         self.cam2_to_box_distance = recorder_functions.camera_to_box_distance(self.real_box_width_cam2_mm,self.box_2_width_px,self.fx_cam2)
 
         # initial offsets
-        bottom_box_cam1 = self.box_1_y+self.box_1_height_px
+        top_box_cam1 = self.box_1_y
         bottom_box_cam2 = self.box_2_y+self.box_2_height_px
-        self.initial_y = (bottom_box_cam1-self.umr_1_center_y)*(self.mm_per_pixel_cam_1_y/1000)
+        self.initial_y = -(top_box_cam1-self.umr_1_center_y)*(self.mm_per_pixel_cam_1_y/1000)
         self.initial_z = (bottom_box_cam2-self.umr_2_center_y)*(self.mm_per_pixel_cam_2_y/1000)
 
         # Calculate the initial Z position based on the box height and camera distance
@@ -641,10 +641,10 @@ class ClosedLoopRecorder:
         self.Z2.append(self.Z2_initial)
 
         # origin shifts (box corner → world origin)
-        # Now we assume that with the camera setup, the left bottom corner of camera 1 is the origin. In camera 2 this is the bottom right corner
+        # Now we assume that with the camera setup, the right top corner of camera 1 is the origin. In camera 2 this is the bottom right corner
         x_box_1_px, y_box_1_px = self.box_1_x, self.box_1_y
-        origin_box1_x_px = x_box_1_px
-        origin_box1_y_px = y_box_1_px + self.box_1_height_px
+        origin_box1_x_px = x_box_1_px + self.box_1_width_px
+        origin_box1_y_px = y_box_1_px
         Z_box = self.cam1_to_box_distance
         self.X_shift = (origin_box1_x_px - self.cx_cam1) * Z_box / self.fx_cam1
         self.Y_shift = (origin_box1_y_px - self.cy_cam1) * Z_box / self.fy_cam1
@@ -723,8 +723,8 @@ class ClosedLoopRecorder:
         d1, d2 = float(self.cam1_to_box_distance), float(self.cam2_to_box_distance)
         X_shift, Y_shift, Z_shift = float(self.X_shift), float(self.Y_shift), float(self.Z_shift)
 
-        A1 = (u1u - cx1) / fx1
-        B1 = (v1u - cy1) / fy1
+        A1 = -(u1u - cx1) / fx1
+        B1 = -(v1u - cy1) / fy1
         C2 = (v2u - cy2) / fy2
 
         den = 1.0 - B1*C2
@@ -860,11 +860,11 @@ class ClosedLoopRecorder:
         self.UMR_2_center_x, self.UMR_2_center_y = undistorted_point_cam2[0,0]
 
         # Calculate position relative to focal point using pinhole model 
-        X_3d_relative = (self.UMR_1_center_x - self.cx_cam1)*self.Z1[-1]/self.fx_cam1
-        Y_3d_relative = ((self.UMR_1_center_y - self.cy_cam1)*self.Z1[-1]/self.fy_cam1)
+        X_3d_relative = -(self.UMR_1_center_x - self.cx_cam1)*self.Z1[-1]/self.fx_cam1
+        Y_3d_relative = -((self.UMR_1_center_y - self.cy_cam1)*self.Z1[-1]/self.fy_cam1)
         Z_3d_relative = ((self.UMR_2_center_y - self.cy_cam2)*self.Z2[-1]/self.fy_cam2)
 
-         # apply world-frame shifts/signs
+        # apply world-frame shifts/signs
         X_3d_next = (X_3d_relative-self.X_shift)
         Y_3d_next = (-Y_3d_relative+self.Y_shift)
         Z_3d_next = -(Z_3d_relative+self.Z_shift)
@@ -1246,8 +1246,8 @@ class ClosedLoopRecorder:
         Z1 = (self.UMR_2_center_y - self.cy_cam2) * self.Z2[-1] / self.fy_cam2
 
         # back-project into cam1 coordinates
-        X_rel = (u - self.cx_cam1) * self.Z1_initial / self.fx_cam1
-        Y_rel = (v - self.cy_cam1) * self.Z1_initial / self.fy_cam1
+        X_rel = -(u - self.cx_cam1) * self.Z1_initial / self.fx_cam1
+        Y_rel = -(v - self.cy_cam1) * self.Z1_initial / self.fy_cam1
         Z_rel = Z1
 
         # Shift into “box‐corner” world frame in X and Y
