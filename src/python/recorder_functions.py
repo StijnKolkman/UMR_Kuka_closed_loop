@@ -36,7 +36,7 @@ def generate_curved_trajectory_3d(
     num_points=50,
     direction_rad=0.0,
     turn_left=True
-):
+    ):
     """3D circular-arc trajectory in XY (Z constant).
     Returns (N,5): [x, y, z, pitch, yaw], with theta tangent to the path.
     """
@@ -81,7 +81,7 @@ def generate_sine_trajectory_3d(
     amplitude=0.1,
     wavelength=1.0,
     num_points=200
-):
+    ):
     """
     Generates a 3D sine-wave trajectory in the XY plane.
     X increases linearly.
