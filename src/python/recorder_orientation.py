@@ -10,6 +10,8 @@ import pandas as pd
 import recorder_functions
 import datetime
 import json
+import sys
+import traceback
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
@@ -41,13 +43,23 @@ class ClosedLoopRecorder:
                 [-1,  0,  0],
                 [ 0,  0, -1]
             ])
+        # Kuka translation --> kinda like a ´hand eye' calibration
+        # This position has the kuka when it is placed directly above the origin of the phantom box and touches the box.
+        # If the kuka is moved with respect to the setup then this value should be recalibrated
+        # Furthermore it is assumed that the kuka is aligned with the setup, meaning moving in X direction for the kuka is the same as in the setup. These should be parallel
+        kuka_handeye_x = 552.11 #in mm
+        kuka_handeye_y = 387.05
+        kuka_handeye_z = 476.77
+        self.kuka_handeye_pos = np.array([kuka_handeye_x,kuka_handeye_y,kuka_handeye_z], dtype=float)/1000 # in meter
+
+        self.Z_offset_trim = -8.73/1000    # Using this the Z offset can be trimmed a bit down or up 
 
         # New send positions
         self.kuka_new_pos = None
         self.kuka_new_rot = None
 
         # reference trajectory
-        self.trajectory_type = "linear"  # Options: "linear", "curved", "sine", "spline", "target_point"
+        self.trajectory_type = "target_point"  # Options: "linear", "curved", "sine", "spline", "target_point"
         self.trajectory_3d = None
 
         # Filtered angles
@@ -188,12 +200,14 @@ class ClosedLoopRecorder:
         style.configure('RecordingOn.TButton',  background='gray', foreground='white')
         style.configure('MotorOff.TButton', background='red', foreground='white')
         style.configure('MotorOn.TButton',  background='green', foreground='white')
-
+        style.configure('TrajectoryReconstruct.TButton', background='red', foreground='white')
+        style.configure('TrajectoryReconstructDone.TButton', background='green', foreground='white')
+        
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
         #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -238,8 +252,15 @@ class ClosedLoopRecorder:
         self.filename_entry = ttk.Entry(self.rec_frame)
         self.filename_entry.insert(0, "Recording")
         self.filename_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=(0,4))
+
         self.record_button = ttk.Button(self.rec_frame, text="Start Recording", command=self.toggle_recording)
         self.record_button.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4,0))
+
+        self.move_kuka_away = ttk.Button(self.rec_frame, text="Move kuka away", command=self.move_kuka_way_reset)
+        self.move_kuka_away.grid(row=2, column=0, sticky="ew", pady=(4,0))
+
+        self.restart_button = ttk.Button(self.rec_frame, text="Restart for Next Attempt", command=self.restart_app)
+        self.restart_button.grid(row=3, column=0, sticky="ew", pady=(4,0))
 
         # Calibration group
         self.cal_frame = ttk.Labelframe(self.controls_frame, text="Calibration", labelanchor="n", padding=(10,8))
@@ -252,17 +273,14 @@ class ClosedLoopRecorder:
         self.calibration_button2 = ttk.Button(self.cal_frame, text="Calibrate Cam 2", command=self.toggle_calibration_cam2,style='ControllerOff.TButton')
         self.calibration_button2.grid(row=1, column=0, sticky="ew", pady=2)
 
-        self.calibrate_kuka_button = ttk.Button(self.cal_frame, text="Calibrate Kuka",command=self.calibrate_kuka,style='CalibrateKuka.TButton')
-        self.calibrate_kuka_button.grid(row=2, column=0, sticky="ew", pady=4)
+        self.trajectory_reconstructor = ttk.Button(self.cal_frame, text="Start 3D Reconstruction", command=self.start_trajectory_reconstruction,style='TrajectoryReconstruct.TButton')
+        self.trajectory_reconstructor.grid(row=2, column=0, sticky="ew", pady=2)
 
-        self.trajectory_reconstructor = ttk.Button(self.cal_frame, text="Start 3D Reconstruction", command=self.start_trajectory_reconstruction)
-        self.trajectory_reconstructor.grid(row=3, column=0, sticky="ew", pady=2)
+        self.calibrate_kuka_button = ttk.Button(self.cal_frame, text="Calibrate Kuka",command=self.calibrate_kuka,style='CalibrateKuka.TButton')
+        self.calibrate_kuka_button.grid(row=3, column=0, sticky="ew", pady=4)
 
         self.recorded_files_label = ttk.Label(self.cal_frame, text="", foreground="blue")
         self.recorded_files_label.grid(row=5, column=0, sticky="w", pady=(4,0))
-
-        self.reset_angle = ttk.Button(self.cal_frame, text="Set angles to initial position", command=self.reset_all_angles)
-        self.reset_angle.grid(row=4, column=0, sticky="ew", pady=2)
 
         # 7.3 Controller group
         self.ctrl_frame = ttk.Labelframe(self.controls_frame, text="Controller", labelanchor="n", padding=(10,8))
@@ -581,13 +599,39 @@ class ClosedLoopRecorder:
         self.UMR_2_roi = recorder_functions.select_roi(self.cap2)
         self.calibration_button2.config(text="Cam 2 Calibrated", style="Calibrated.TButton")
 
-    def reset_all_angles(self):
-        """Reset KUKA rotation to its calibrated starting angle."""
-        if self.kuka_start_rot is None or self.kuka_new_pos is None or self.kuka_new_pos is None:
-            messagebox.showerror("Reset Error", "No starting angle defined, first calibrate the KUKA!")
-            return 
+    def move_kuka_way_reset(self):
+        """Moves the kuka 0.5m upwards and resets angle"""
+        if self.kuka_start_rot is None:
+            messagebox.showerror("Error", "First do something before using me ;)")
+            return
+        
         self.kuka_new_rot = self.kuka_start_rot
-        self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
+        kuka_current_pos,_ = self.get_current_pose()
+
+        # add the offset in meter and apply it to the kuka
+        offset = [0.0,0.1,0.25]
+        self.send_pose(kuka_current_pos+offset,self.kuka_new_rot)
+
+    def calibrate_kuka(self):
+        """Moves the kuka above the target and sets the staring position and rotation"""
+
+        if self.reconstruction_boolean == False:
+            messagebox.showerror("Error", "First start the trajectory reconstruction!")
+            return
+
+        # Define starting location
+        X0, Y0, Z0 = self.compute_initial_world_xyz()
+        Kuka_translation_to_umr = np.array([-Y0,-X0,Z0+self.Z_offset_trim], dtype=float)
+        self.kuka_start_pos = self.kuka_handeye_pos + Kuka_translation_to_umr
+
+        # Set the startin rotation 
+        self.kuka_start_rot = np.array([-math.pi/2, 0.0,0.0], dtype=float)
+
+        # Set the kuka to the correct starting position
+        self.send_pose(self.kuka_start_pos,self.kuka_start_rot)
+
+        # Set the button to being calibrated
+        self.calibrate_kuka_button.config(text="KUKA Calibrated",style='CalibrateKukaDone.TButton')
 
     def start_trajectory_reconstruction(self):
         """Initialize 3D trajectory reconstruction using calibrated ROIs from both cameras."""
@@ -596,7 +640,8 @@ class ClosedLoopRecorder:
             messagebox.showerror("Error", "Camera('s) not calibrated, first calibrate camera 1 and 2!")
             return
 
-
+        # Set the button to green
+        self.trajectory_reconstructor.config(text="Trajectory started",style='TrajectoryReconstructDone.TButton')
         self.reconstruction_boolean = True
         
         # extract intrinsics
@@ -700,40 +745,37 @@ class ClosedLoopRecorder:
     def pick_target(self):
         """Ask user to click the target once in each camera and compute 3D world coords. Returns [X, Y, Z] in meters (world frame)."""
         
-        # Let user select in cam1 and cam2
+        # Let user select in target in cam1 and cam2
         roi1 = recorder_functions.select_roi(self.cap1)
         roi2 = recorder_functions.select_roi(self.cap2)
 
         # ROI centers
-        x1,y1,w1,h1 = roi1; u1 = x1 + w1/2.0; v1 = y1 + h1/2.0
-        x2,y2,w2,h2 = roi2; u2 = x2 + w2/2.0; v2 = y2 + h2/2.0
+        x1,y1,w1,h1 = roi1; 
+        X1_target = x1 + w1/2.0; 
+        Y1_target = y1 + h1/2.0
 
-        # Undistort picks
-        p1u = cv2.undistortPoints(np.array([[[u1,v1]]],np.float32),self.camera_matrix1,self.dist_coeffs1,P=self.camera_matrix1)[0,0]
-        u1u,v1u = float(p1u[0]), float(p1u[1])
+        x2,y2,w2,h2 = roi2; 
+        X2_target = x2 + w2/2.0; 
+        Y2_target = y2 + h2/2.0
 
-        p2u = cv2.undistortPoints(np.array([[[u2,v2]]],np.float32),self.camera_matrix2,self.dist_coeffs2,P=self.camera_matrix2)[0,0]
-        u2u,v2u = float(p2u[0]), float(p2u[1])
+        #undistort the UMRs
+        point_cam1 = np.array([[[X1_target, Y1_target]]], dtype=np.float32)  # shape (1,1,2)
+        undistorted_point_cam1 = cv2.undistortPoints(point_cam1, self.camera_matrix1, self.dist_coeffs1, P=self.camera_matrix1)
+        X1_target, Y1_target = undistorted_point_cam1[0,0]
 
-        # Geometry
-        fx1, fy1 = self.camera_matrix1[0,0], self.camera_matrix1[1,1]
-        cx1, cy1 = self.camera_matrix1[0,2], self.camera_matrix1[1,2]
-        fy2, cy2 = self.camera_matrix2[1,1], self.camera_matrix2[1,2]
+        point_cam2 = np.array([[[X2_target, Y2_target]]], dtype=np.float32)
+        undistorted_point_cam2 = cv2.undistortPoints(point_cam2, self.camera_matrix2, self.dist_coeffs2, P=self.camera_matrix2)
+        X2_target, Y2_target = undistorted_point_cam2[0,0]
 
-        d1, d2 = float(self.cam1_to_box_distance), float(self.cam2_to_box_distance)
-        X_shift, Y_shift, Z_shift = float(self.X_shift), float(self.Y_shift), float(self.Z_shift)
+        # Calculate position relative to focal point using pinhole model 
+        X_3d_relative = -(X1_target - self.cx_cam1)*self.Z1[-1]/self.fx_cam1
+        Y_3d_relative = -(Y1_target - self.cy_cam1)*self.Z1[-1]/self.fy_cam1
+        Z_3d_relative = -(Y2_target - self.cy_cam2)*self.Z2[-1]/self.fy_cam2
 
-        A1 = -(u1u - cx1) / fx1
-        B1 = -(v1u - cy1) / fy1
-        C2 = (v2u - cy2) / fy2
-
-        den = 1.0 - B1*C2
-        if abs(den) < 1e-9:
-            raise RuntimeError("Degenerate geometry (1 - B1*C2 ≈ 0). Try again.")
-
-        Y = (-B1*d1 + B1*C2*d2 + B1*Z_shift + Y_shift) / den
-        Z = -C2*d2 - C2*Y - Z_shift
-        X =  A1*(d1 + Z) - X_shift
+        # apply world-frame shifts/signs
+        X = (X_3d_relative-self.X_shift)
+        Y = (-Y_3d_relative+self.Y_shift)
+        Z = (Z_3d_relative+self.Z_shift)
 
         return [float(X), float(Y), float(Z)]
 
@@ -906,11 +948,12 @@ class ClosedLoopRecorder:
 
         # make dt robust against zero and outliers
         DT_MIN = 1e-3      # 1 ms lower bound (avoid zero)
-        DT_MAX = 0.10      # 100 ms upper bound
+        DT_MAX = 0.200      # 200 ms upper bound
 
         # Clip dt into a safe range
         dt = min(max(float(dt_raw), DT_MIN), DT_MAX)
-        
+        print(dt)
+        #self.get_logger().info(f"My dt value: {dt}")
         # PITCH CONTROLLER-------------------------------------------------------------------------
         # pitch is controlled by the kuka moving in front or back of the umr
 
@@ -1161,7 +1204,7 @@ class ClosedLoopRecorder:
         yaw_compensation = u_sat
 
         if time_controller - self.start_time_controller > 60:
-            yaw_compensation = np.radians(-20)  # after 1000 seconds, stop yaw compensation to see effect
+            yaw_compensation = np.radians(-30)  # after 1000 seconds, stop yaw compensation to see effect
 
         # update the rotation of the kuka
         delta_rot = np.array([0, self.angle_1_filtered+yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
@@ -1217,11 +1260,6 @@ class ClosedLoopRecorder:
             self.yaw_iterm_rec.append(yaw_compensation_iterm)
             self.yaw_comp_rec.append(yaw_compensation) 
         return 
-    
-    def calibrate_kuka(self):
-        """Store the current KUKA pose as the calibration reference."""
-        self.kuka_start_pos,self.kuka_start_rot = self.get_current_pose()
-        self.calibrate_kuka_button.config(text="KUKA Calibrated",style='CalibrateKukaDone.TButton')
 
     def set_new_velocity(self):
         """Read velocity input (Hz), convert to rad/s, and update motor speed setting."""
@@ -1358,41 +1396,87 @@ class ClosedLoopRecorder:
                 print("First turn the reconstructor on")
                 return
             time_controller = time.perf_counter()
-            self.controller_curve_experiment(time_controller) # or self.straight_controller(time_controller) for straight controller
+            self.controller(time_controller) # or self.straight_controller(time_controller) for straight controller
 
         self.window.after(10, self.update_frame)
 
     def on_closing(self):
         """Handle safe shutdown when closing the application window."""
+        self.safe_shutdown()
+        # Normal exit when user closes the window
+        try:
+            os._exit(0)  # immediate, avoids hanging atexit handlers if any driver misbehaves
+        except Exception:
+            sys.exit(0)
 
-        # stop recording safely
-        if getattr(self, "recording", False):
+    def safe_shutdown(self):
+        """Handle safe shutdown when closing the application window."""
+        try:
+            # Stop controller & motor first (safety)
+            self.controller_boolean = False
+            self.motor_boolean = False
             try:
-                if hasattr(self, "out1"): 
-                    self.out1.release()
-                if hasattr(self, "out2"): 
-                    self.out2.release()
+                self.kuka_python.set_motor_speed(0.0)
             except Exception as e:
-                print(f"[WARN] Failed to release video writers: {e}")
+                print(f"[WARN] Motor stop failed: {e}")
 
-        # release cameras
+            # Stop recording safely
+            if getattr(self, "recording", False):
+                try:
+                    self.recording = False
+                    if hasattr(self, "out1"): self.out1.release()
+                    if hasattr(self, "out2"): self.out2.release()
+                except Exception as e:
+                    print(f"[WARN] Failed to release video writers: {e}")
+
+            # Release cameras
+            try:
+                if hasattr(self, "cap1"): self.cap1.release()
+                if hasattr(self, "cap2"): self.cap2.release()
+            except Exception as e:
+                print(f"[WARN] Failed to release cameras: {e}")
+
+            # Close main window
+            try:
+                if hasattr(self, "window") and self.window.winfo_exists():
+                    # Prevent scheduling more updates
+                    self.restarting = True
+                    self.window.quit()     # break out of mainloop
+                    self.window.destroy()  # destroy widgets
+            except Exception as e:
+                print(f"[WARN] Failed to destroy window: {e}")
+
+            # Shut down KUKA publisher/ROS
+            try:
+                self.kuka_python.shutdown_publisher()
+            except Exception as e:
+                print(f"[WARN] Failed to shut down KUKA publisher: {e}")
+
+        except Exception:
+            print("[WARN] Unexpected error during safe_shutdown:")
+            traceback.print_exc()
+
+    def restart_app(self):
+        """Safely restart the entire Python process for a fresh attempt."""
+
+        if getattr(self, "restarting", False):
+            return
+        self.restarting = True
+
+        # Disable the button immediately
         try:
-            if hasattr(self, "cap1"): 
-                self.cap1.release()
-            if hasattr(self, "cap2"): 
-                self.cap2.release()
-        except Exception as e:
-            print(f"[WARN] Failed to release cameras: {e}")
+            self.restart_button.configure(state="disabled")
+        except Exception:
+            pass
 
-        # close main window
-        if hasattr(self, "window"):
-            self.window.destroy()
+        # Tear everything down
+        self.safe_shutdown()
 
-        # shut down publisher
-        try:
-            self.kuka_python.shutdown_publisher()
-        except Exception as e:
-            print(f"[WARN] Failed to shut down KUKA publisher: {e}")
+        # Replace current process with a fresh Python running the same script
+        print("[INFO] Relaunching process for next attempt...")
+        python = sys.executable
+        argv = [python] + sys.argv  # same args as current run
+        os.execv(python, argv)      # never returns if successful
 
 if __name__ == "__main__":
     root = tk.Tk()
