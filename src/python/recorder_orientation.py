@@ -47,9 +47,9 @@ class ClosedLoopRecorder:
         # This position has the kuka when it is placed directly above the origin of the phantom box and touches the box.
         # If the kuka is moved with respect to the setup then this value should be recalibrated
         # Furthermore it is assumed that the kuka is aligned with the setup, meaning moving in X direction for the kuka is the same as in the setup. These should be parallel
-        kuka_handeye_x = 552.11 #in mm
-        kuka_handeye_y = 387.05
-        kuka_handeye_z = 476.77
+        kuka_handeye_x = 542.33 #in mm
+        kuka_handeye_y = 54.97
+        kuka_handeye_z = 477.51
         self.kuka_handeye_pos = np.array([kuka_handeye_x,kuka_handeye_y,kuka_handeye_z], dtype=float)/1000 # in meter
 
         self.Z_offset_trim = -8.73/1000    # Using this the Z offset can be trimmed a bit down or up 
@@ -206,8 +206,8 @@ class ClosedLoopRecorder:
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
         #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -303,7 +303,7 @@ class ClosedLoopRecorder:
         self.motor_button.grid(row=2, column=0, columnspan=3, sticky="ew", pady=2)
 
         # Angle displays
-        self.angle1_label = ttk.Label(self.ctrl_frame, text="Angle 1: ---°")
+        self.angle1_label = ttk.Labelinearl(self.ctrl_frame, text="Angle 1: ---°")
         self.angle1_label.grid(row=3, column=0, sticky="w", padx=5, pady=(6,0))
         self.angle2_label = ttk.Label(self.ctrl_frame, text="Angle 2: ---°")
         self.angle2_label.grid(row=3, column=1, sticky="w", padx=5, pady=(6,0))
@@ -313,7 +313,7 @@ class ClosedLoopRecorder:
         self.focus_label1.grid(row=4, column=0, sticky="w", padx=5, pady=(6,0))
         self.focus_slider1 = ttk.Scale(self.ctrl_frame, from_=0, to=255, orient='horizontal', command=lambda val: self.set_focus(self.cap1, "focus_value_label1", val))
         self.focus_slider1.set(91)
-        self.focus_slider1.grid(row=4, column=1, columnspan=2, sticky="ew", padx=5, pady=(6,0))
+        self.focus_slider1.grid(row=linear4, column=1, columnspan=2, sticky="ew", padx=5, pady=(6,0))
 
         # Cam 2 focus
         self.focus_label2 = ttk.Label(self.ctrl_frame, text="Focus Cam 2:")
@@ -337,7 +337,7 @@ class ClosedLoopRecorder:
         self.yaw_setpoint_label = ttk.Label(self.yaw_info, text="--- rad")
         self.yaw_setpoint_label.grid(row=1, column=1, sticky="w")
 
-        # Row 2: yaw error
+        # Row 2: yaw errorlinear
         ttk.Label(self.yaw_info, text="Yaw Error:").grid(row=2, column=0, sticky="w")
         self.yaw_error_label = ttk.Label(self.yaw_info, text="--- rad")
         self.yaw_error_label.grid(row=2, column=1, sticky="w")
@@ -379,7 +379,7 @@ class ClosedLoopRecorder:
 
         # Row 3: feedforward compensation
         ttk.Label(self.pitch_info, text="Feedforward term:").grid(row=3, column=0, sticky="w")
-        self.pitch_feedforward_label = ttk.Label(self.pitch_info, text="--- dx")
+        self.pitch_feedforward_labelinearl = ttk.Label(self.pitch_info, text="--- dx")
         self.pitch_feedforward_label.grid(row=3, column=1, sticky="w")
 
         # Row 4: P‐term

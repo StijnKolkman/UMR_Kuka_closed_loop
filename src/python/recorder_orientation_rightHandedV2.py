@@ -39,20 +39,21 @@ class ClosedLoopRecorder:
 
         # Box to Kuka rotation matrix 
         self.R_BoxToKuka = np.array([
-                [ 0, -1,  0],
-                [-1,  0,  0],
+                [ 0, 1,  0],
+                [1,  0,  0],
                 [ 0,  0, -1]
             ])
         # Kuka translation --> kinda like a ´hand eye' calibration
         # This position has the kuka when it is placed directly above the origin of the phantom box and touches the box.
         # If the kuka is moved with respect to the setup then this value should be recalibrated
         # Furthermore it is assumed that the kuka is aligned with the setup, meaning moving in X direction for the kuka is the same as in the setup. These should be parallel
-        kuka_handeye_x = 552.11 #in mm
-        kuka_handeye_y = 387.05
-        kuka_handeye_z = 476.77
+        kuka_handeye_x = 542.33 #in mm
+        kuka_handeye_y = 54.97
+        kuka_handeye_z = 477.51
         self.kuka_handeye_pos = np.array([kuka_handeye_x,kuka_handeye_y,kuka_handeye_z], dtype=float)/1000 # in meter
 
         self.Z_offset_trim = -8.73/1000    # Using this the Z offset can be trimmed a bit down or up 
+
 
         # New send positions
         self.kuka_new_pos = None
@@ -743,49 +744,53 @@ class ClosedLoopRecorder:
         recorder_functions.save_trajectory_to_csv(self.trajectory_3d,self.filename_entry)
 
     def pick_target(self):
-        """Ask user to click the target once in each camera and compute 3D world coords. Returns [X, Y, Z] in meters (world frame)."""
-        
-        # Let user select in target in cam1 and cam2
+        """Ask user to click the target once in each camera and compute 3D world coords.
+        Returns [X, Y, Z] in meters (world frame)."""
+
+        # Let user select target in cam1 and cam2
         roi1 = recorder_functions.select_roi(self.cap1)
         roi2 = recorder_functions.select_roi(self.cap2)
 
-        # ROI centers
-        x1,y1,w1,h1 = roi1; 
-        X1_target = x1 + w1/2.0; 
-        Y1_target = y1 + h1/2.0
+        # ROI centers (pixels)
+        x1, y1, w1, h1 = roi1
+        X1_target = x1 + w1 / 2.0
+        Y1_target = y1 + h1 / 2.0
 
-        x2,y2,w2,h2 = roi2; 
-        X2_target = x2 + w2/2.0; 
-        Y2_target = y2 + h2/2.0
+        x2, y2, w2, h2 = roi2
+        X2_target = x2 + w2 / 2.0
+        Y2_target = y2 + h2 / 2.0
 
-        #undistort the UMRs
-        point_cam1 = np.array([[[X1_target, Y1_target]]], dtype=np.float32)  # shape (1,1,2)
-        undistorted_point_cam1 = cv2.undistortPoints(point_cam1, self.camera_matrix1, self.dist_coeffs1, P=self.camera_matrix1)
-        X1_target, Y1_target = undistorted_point_cam1[0,0]
+        # Undistort target points
+        p1 = np.array([[[X1_target, Y1_target]]], dtype=np.float32)
+        p2 = np.array([[[X2_target, Y2_target]]], dtype=np.float32)
 
-        point_cam2 = np.array([[[X2_target, Y2_target]]], dtype=np.float32)
-        undistorted_point_cam2 = cv2.undistortPoints(point_cam2, self.camera_matrix2, self.dist_coeffs2, P=self.camera_matrix2)
-        X2_target, Y2_target = undistorted_point_cam2[0,0]
+        u1 = cv2.undistortPoints(p1, self.camera_matrix1, self.dist_coeffs1, P=self.camera_matrix1)[0, 0]
+        u2 = cv2.undistortPoints(p2, self.camera_matrix2, self.dist_coeffs2, P=self.camera_matrix2)[0, 0]
+        X1_target, Y1_target = u1
+        X2_target, Y2_target = u2
 
-        # initial offsets
-        top_box_cam1 = self.box_1_y
-        bottom_box_cam2 = self.box_2_y+self.box_2_height_px
-        initial_x = -(top_box_cam1-Y1_target)*(self.mm_per_pixel_cam_1_y/1000)
-        initial_z = (bottom_box_cam2-Y2_target)*(self.mm_per_pixel_cam_2_y/1000)
+        # Initial offsets (match start_trajectory_reconstruction)
+        top_box_cam1    = self.box_1_y
+        bottom_box_cam2 = self.box_2_y + self.box_2_height_px
 
-        # Calculate the initial Z position based on the box height and camera distance
+        # cam1 vertical → world Y
+        initial_y = -(top_box_cam1 - Y1_target) * (self.mm_per_pixel_cam_1_y / 1000.0)
+        # cam2 vertical → world Z
+        initial_z =  (bottom_box_cam2 - Y2_target) * (self.mm_per_pixel_cam_2_y / 1000.0)
+
+        # Depths to the clicked point (same mapping as in start_trajectory_reconstruction)
         Z1_initial = self.cam1_to_box_distance + initial_z
-        Z2_initial = self.cam2_to_box_distance + initial_x
+        Z2_initial = self.cam2_to_box_distance + initial_y
 
-        # Calculate position relative to focal point using pinhole model 
-        Y_3d_relative = -(X1_target - self.cx_cam1)*Z1_initial/self.fx_cam1
-        X_3d_relative = -(Y1_target - self.cy_cam1)*Z1_initial/self.fy_cam1
-        Z_3d_relative = -(Y2_target - self.cy_cam2)*Z2_initial/self.fy_cam2
+        # Pinhole back-projection (match update_trajectory)
+        X_3d_relative = -(X1_target - self.cx_cam1) * Z1_initial / self.fx_cam1
+        Y_3d_relative = -(Y1_target - self.cy_cam1) * Z1_initial / self.fy_cam1
+        Z_3d_relative = -(Y2_target - self.cy_cam2) * Z2_initial / self.fy_cam2
 
-        # apply world-frame shifts/signs
-        X = (X_3d_relative-self.X_shift)
-        Y = (-Y_3d_relative+self.Y_shift)
-        Z = (Z_3d_relative+self.Z_shift)
+        # World-frame shifts/signs (same as elsewhere)
+        Y = X_3d_relative - self.X_shift
+        X = -Y_3d_relative + self.Y_shift
+        Z =  Z_3d_relative + self.Z_shift
 
         return [float(X), float(Y), float(Z)]
 
@@ -830,24 +835,25 @@ class ClosedLoopRecorder:
         h = self.real_box_height_cam1_mm     # height in mm (camera 1 view)
         d = self.real_box_height_cam2_mm     # depth in mm (camera 2 view)
 
-        # Define box corners (starting at origin)
+        # Define box corners (x and y swapped)
         corners = np.array([
             [0, 0, 0],
-            [w, 0, 0],
-            [w, h, 0],
-            [0, h, 0],
+            [h, 0, 0],
+            [h, w, 0],
+            [0, w, 0],
             [0, 0, d],
-            [w, 0, d],
-            [w, h, d],
-            [0, h, d]
+            [h, 0, d],
+            [h, w, d],
+            [0, w, d]
         ])
 
-        # List of edge
+        # Edges stay the same
         edges = [
             (0,1), (1,2), (2,3), (3,0),   # bottom face
             (4,5), (5,6), (6,7), (7,4),   # top face
             (0,4), (1,5), (2,6), (3,7)    # vertical edges
         ]
+
 
         # plot calibration box
         for start, end in edges:
@@ -869,7 +875,7 @@ class ClosedLoopRecorder:
         mid_z = d / 2.0
 
         self.ax3d.set_xlim(mid_x - max_range, mid_x + max_range)
-        self.ax3d.set_ylim(mid_y + max_range, mid_y - max_range) #flip Y --> i am stupid and used left hand coordinate system when defining the camera :(
+        self.ax3d.set_ylim(mid_y - max_range, mid_y + max_range) #flip Y --> i am stupid and used left hand coordinate system when defining the camera :(
         self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
 
 

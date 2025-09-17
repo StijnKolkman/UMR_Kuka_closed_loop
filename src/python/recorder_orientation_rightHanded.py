@@ -7,9 +7,11 @@ import numpy as np
 import os
 import math
 import pandas as pd
-import recorder_functions_right_handed
+import recorder_functions
 import datetime
 import json
+import sys
+import traceback
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
@@ -38,16 +40,16 @@ class ClosedLoopRecorder:
         # Box to Kuka rotation matrix 
         self.R_BoxToKuka = np.array([
                 [ 0, -1,  0],
-                [-1,  0,  0],
+                [1,  0,  0],
                 [ 0,  0, -1]
             ])
         # Kuka translation --> kinda like a ´hand eye' calibration
         # This position has the kuka when it is placed directly above the origin of the phantom box and touches the box.
         # If the kuka is moved with respect to the setup then this value should be recalibrated
         # Furthermore it is assumed that the kuka is aligned with the setup, meaning moving in X direction for the kuka is the same as in the setup. These should be parallel
-        kuka_handeye_x = 552.11 #in mm
-        kuka_handeye_y = 387.05
-        kuka_handeye_z = 476.77
+        kuka_handeye_x = 586.33 #in mm
+        kuka_handeye_y = 54.97
+        kuka_handeye_z = 477.51
         self.kuka_handeye_pos = np.array([kuka_handeye_x,kuka_handeye_y,kuka_handeye_z], dtype=float)/1000 # in meter
 
         self.Z_offset_trim = -8.73/1000    # Using this the Z offset can be trimmed a bit down or up 
@@ -204,8 +206,8 @@ class ClosedLoopRecorder:
         # ALL THE VIDEO RELATED SETTINGS
         #self.cap1 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam1.mp4")
         #self.cap2 = cv2.VideoCapture(r"/home/ram-micro/Documents/Stijn/UMR_Kuka_closed_loop/test_50deg_02hz/test_50deg_02hz_cam2.mp4")
-        self.cap1 = cv2.VideoCapture(4, cv2.CAP_V4L2) 
-        self.cap2 = cv2.VideoCapture(6, cv2.CAP_V4L2)
+        self.cap1 = cv2.VideoCapture(6, cv2.CAP_V4L2) 
+        self.cap2 = cv2.VideoCapture(4, cv2.CAP_V4L2)
         self.cap1.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap2.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self.cap1.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set width
@@ -301,7 +303,7 @@ class ClosedLoopRecorder:
         self.motor_button.grid(row=2, column=0, columnspan=3, sticky="ew", pady=2)
 
         # Angle displays
-        self.angle1_label = ttk.Label(self.ctrl_frame, text="Angle 1: ---°")
+        self.angle1_label = ttk.Labelinearl(self.ctrl_frame, text="Angle 1: ---°")
         self.angle1_label.grid(row=3, column=0, sticky="w", padx=5, pady=(6,0))
         self.angle2_label = ttk.Label(self.ctrl_frame, text="Angle 2: ---°")
         self.angle2_label.grid(row=3, column=1, sticky="w", padx=5, pady=(6,0))
@@ -311,7 +313,7 @@ class ClosedLoopRecorder:
         self.focus_label1.grid(row=4, column=0, sticky="w", padx=5, pady=(6,0))
         self.focus_slider1 = ttk.Scale(self.ctrl_frame, from_=0, to=255, orient='horizontal', command=lambda val: self.set_focus(self.cap1, "focus_value_label1", val))
         self.focus_slider1.set(91)
-        self.focus_slider1.grid(row=4, column=1, columnspan=2, sticky="ew", padx=5, pady=(6,0))
+        self.focus_slider1.grid(row=linear4, column=1, columnspan=2, sticky="ew", padx=5, pady=(6,0))
 
         # Cam 2 focus
         self.focus_label2 = ttk.Label(self.ctrl_frame, text="Focus Cam 2:")
@@ -335,7 +337,7 @@ class ClosedLoopRecorder:
         self.yaw_setpoint_label = ttk.Label(self.yaw_info, text="--- rad")
         self.yaw_setpoint_label.grid(row=1, column=1, sticky="w")
 
-        # Row 2: yaw error
+        # Row 2: yaw errorlinear
         ttk.Label(self.yaw_info, text="Yaw Error:").grid(row=2, column=0, sticky="w")
         self.yaw_error_label = ttk.Label(self.yaw_info, text="--- rad")
         self.yaw_error_label.grid(row=2, column=1, sticky="w")
@@ -377,7 +379,7 @@ class ClosedLoopRecorder:
 
         # Row 3: feedforward compensation
         ttk.Label(self.pitch_info, text="Feedforward term:").grid(row=3, column=0, sticky="w")
-        self.pitch_feedforward_label = ttk.Label(self.pitch_info, text="--- dx")
+        self.pitch_feedforward_labelinearl = ttk.Label(self.pitch_info, text="--- dx")
         self.pitch_feedforward_label.grid(row=3, column=1, sticky="w")
 
         # Row 4: P‐term
@@ -587,23 +589,15 @@ class ClosedLoopRecorder:
 
     def toggle_calibration_cam1(self):
         """Select ROIs for box and UMR in camera 1."""
-        self.box_1_roi = recorder_functions_right_handed.select_roi(self.cap1)
-        self.UMR_1_roi = recorder_functions_right_handed.select_roi(self.cap1)
+        self.box_1_roi = recorder_functions.select_roi(self.cap1)
+        self.UMR_1_roi = recorder_functions.select_roi(self.cap1)
         self.calibration_button1.config(text="Cam 1 Calibrated", style="Calibrated.TButton")
-
+    
     def toggle_calibration_cam2(self):
         """Select ROIs for box and UMR in camera 2."""
-        self.box_2_roi = recorder_functions_right_handed.select_roi(self.cap2)
-        self.UMR_2_roi = recorder_functions_right_handed.select_roi(self.cap2)
+        self.box_2_roi = recorder_functions.select_roi(self.cap2)
+        self.UMR_2_roi = recorder_functions.select_roi(self.cap2)
         self.calibration_button2.config(text="Cam 2 Calibrated", style="Calibrated.TButton")
-
-    def reset_all_angles(self):
-        """Reset KUKA rotation to its calibrated starting angle."""
-        if self.kuka_start_rot is None or self.kuka_new_pos is None or self.kuka_new_pos is None:
-            messagebox.showerror("Reset Error", "No starting angle defined, first calibrate the KUKA!")
-            return 
-        self.kuka_new_rot = self.kuka_start_rot
-        self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
 
     def move_kuka_way_reset(self):
         """Moves the kuka 0.5m upwards and resets angle"""
@@ -618,6 +612,27 @@ class ClosedLoopRecorder:
         offset = [0.0,0.1,0.25]
         self.send_pose(kuka_current_pos+offset,self.kuka_new_rot)
 
+    def calibrate_kuka(self):
+        """Moves the kuka above the target and sets the staring position and rotation"""
+
+        if self.reconstruction_boolean == False:
+            messagebox.showerror("Error", "First start the trajectory reconstruction!")
+            return
+
+        # Define starting location
+        X0, Y0, Z0 = self.compute_initial_world_xyz()
+        Kuka_translation_to_umr = np.array([-Y0,-X0,Z0+self.Z_offset_trim], dtype=float)
+        self.kuka_start_pos = self.kuka_handeye_pos + Kuka_translation_to_umr
+
+        # Set the startin rotation 
+        self.kuka_start_rot = np.array([-math.pi/2, 0.0,0.0], dtype=float)
+
+        # Set the kuka to the correct starting position
+        self.send_pose(self.kuka_start_pos,self.kuka_start_rot)
+
+        # Set the button to being calibrated
+        self.calibrate_kuka_button.config(text="KUKA Calibrated",style='CalibrateKukaDone.TButton')
+
     def start_trajectory_reconstruction(self):
         """Initialize 3D trajectory reconstruction using calibrated ROIs from both cameras."""
 
@@ -625,7 +640,8 @@ class ClosedLoopRecorder:
             messagebox.showerror("Error", "Camera('s) not calibrated, first calibrate camera 1 and 2!")
             return
 
-
+        # Set the button to green
+        self.trajectory_reconstructor.config(text="Trajectory started",style='TrajectoryReconstructDone.TButton')
         self.reconstruction_boolean = True
         
         # extract intrinsics
@@ -654,29 +670,29 @@ class ClosedLoopRecorder:
         self.mm_per_pixel_cam_2_y = self.real_box_height_cam2_mm / self.box_2_height_px
 
         # distances from cameras to box
-        self.cam1_to_box_distance = recorder_functions_right_handed.camera_to_box_distance(self.real_box_width_cam1_mm,self.box_1_width_px,self.fx_cam1)
-        self.cam2_to_box_distance = recorder_functions_right_handed.camera_to_box_distance(self.real_box_width_cam2_mm,self.box_2_width_px,self.fx_cam2)
+        self.cam1_to_box_distance = recorder_functions.camera_to_box_distance(self.real_box_width_cam1_mm,self.box_1_width_px,self.fx_cam1)
+        self.cam2_to_box_distance = recorder_functions.camera_to_box_distance(self.real_box_width_cam2_mm,self.box_2_width_px,self.fx_cam2)
 
         # initial offsets
-        top_box_cam1 = self.box_1_y
+        bottom_box_cam1 = self.box_1_y+self.box_1_height_px
         bottom_box_cam2 = self.box_2_y+self.box_2_height_px
-        self.initial_x = -(top_box_cam1-self.umr_1_center_y)*(self.mm_per_pixel_cam_1_y/1000)
+        self.initial_y = (bottom_box_cam1-self.umr_1_center_y)*(self.mm_per_pixel_cam_1_y/1000)
         self.initial_z = (bottom_box_cam2-self.umr_2_center_y)*(self.mm_per_pixel_cam_2_y/1000)
 
         # Calculate the initial Z position based on the box height and camera distance
         self.Z1_initial = self.cam1_to_box_distance + self.initial_z
-        self.Z2_initial = self.cam2_to_box_distance + self.initial_x
+        self.Z2_initial = self.cam2_to_box_distance + self.initial_y
         self.Z1.append(self.Z1_initial)
         self.Z2.append(self.Z2_initial)
 
         # origin shifts (box corner → world origin)
-        # Now we assume that with the camera setup, the right top corner of camera 1 is the origin. In camera 2 this is the bottom right corner
+        # Now we assume that with the camera setup, the right bottom corner of camera 1 is the origin. In camera 2 this is the bottom right corner in the back
         x_box_1_px, y_box_1_px = self.box_1_x, self.box_1_y
         origin_box1_x_px = x_box_1_px + self.box_1_width_px
-        origin_box1_y_px = y_box_1_px
+        origin_box1_y_px = y_box_1_px +self.box_1_height_px
         Z_box = self.cam1_to_box_distance
-        self.Y_shift = (origin_box1_x_px - self.cx_cam1) * Z_box / self.fx_cam1
-        self.X_shift = (origin_box1_y_px - self.cy_cam1) * Z_box / self.fy_cam1
+        self.X_shift = -(origin_box1_x_px - self.cx_cam1) * Z_box / self.fx_cam1
+        self.Y_shift = -(origin_box1_y_px - self.cy_cam1) * Z_box / self.fy_cam1
 
         x_box_2_px, y_box_2_px = self.box_2_x, self.box_2_y
         origin_box2_y_px = y_box_2_px + self.box_2_height_px
@@ -688,25 +704,25 @@ class ClosedLoopRecorder:
         X0, Y0, Z0 = self.compute_initial_world_xyz()
 
         if self.trajectory_type == "linear":
-            self.trajectory_3d = recorder_functions_right_handed.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=200,direction_rad=0.0)
+            self.trajectory_3d = recorder_functions.generate_relative_linear_trajectory_3d(X0,Y0,Z0,length_m=0.1,num_points=200,direction_rad=0.0)
 
         elif self.trajectory_type == "curved":
-            self.trajectory_3d = recorder_functions_right_handed.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=200,direction_rad=0.0,turn_left=False)
+            self.trajectory_3d = recorder_functions.generate_curved_trajectory_3d(X0,Y0,Z0,radius_m=0.1,arc_angle_rad=math.pi/2,num_points=200,direction_rad=0.0,turn_left=False)
 
         elif self.trajectory_type == "sine":
-            self.trajectory_3d = recorder_functions_right_handed.generate_sine_trajectory_3d(
+            self.trajectory_3d = recorder_functions.generate_sine_trajectory_3d(
                 X0, Y0, Z0,
-                length=0.15,        # total distance to travel in X
+                length_x=0.15,        # total distance to travel in X
                 amplitude=0.01,       # peak Y deviation (sine amplitude)
                 wavelength=0.1,      # wavelength of the sine (in meters of X)  
                 num_points=200)
             
         elif self.trajectory_type == "target_point": # spline to a target point that you need to select
             ret, frame_1 = self.cap1.read()
-            _, _, angle_1, _, _ = recorder_functions_right_handed.update_roi_center(frame_1, self.UMR_1_roi)
+            _, _, angle_1, _, _ = recorder_functions.update_roi_center(frame_1, self.UMR_1_roi)
 
             ret, frame_2 = self.cap2.read()
-            _, _, angle_2, _, _ = recorder_functions_right_handed.update_roi_center(frame_2, self.UMR_2_roi)
+            _, _, angle_2, _, _ = recorder_functions.update_roi_center(frame_2, self.UMR_2_roi)
 
 
             current_pitch = -angle_2  # in radians
@@ -721,17 +737,17 @@ class ClosedLoopRecorder:
             self.target_point = np.array(p1)  # save it for plotting
             h1  = [1.0, 0.0, 0.0]   # final direction = along X axis meaning pitch=0, yaw=0
             Lout, Lin = 0.05, 0.05  # how long the start and end straight pieces are
-            self.trajectory_3d = recorder_functions_right_handed.generate_quintic_spline_pose(p0,h0,p1,h1,Lout,Lin)
+            self.trajectory_3d = recorder_functions.generate_quintic_spline_pose(p0,h0,p1,h1,Lout,Lin)
 
         # save the trajectory to CSV
-        recorder_functions_right_handed.save_trajectory_to_csv(self.trajectory_3d,self.filename_entry)
+        recorder_functions.save_trajectory_to_csv(self.trajectory_3d,self.filename_entry)
 
     def pick_target(self):
         """Ask user to click the target once in each camera and compute 3D world coords. Returns [X, Y, Z] in meters (world frame)."""
         
         # Let user select in target in cam1 and cam2
-        roi1 = recorder_functions_right_handed.select_roi(self.cap1)
-        roi2 = recorder_functions_right_handed.select_roi(self.cap2)
+        roi1 = recorder_functions.select_roi(self.cap1)
+        roi2 = recorder_functions.select_roi(self.cap2)
 
         # ROI centers
         x1,y1,w1,h1 = roi1; 
@@ -754,16 +770,16 @@ class ClosedLoopRecorder:
         # initial offsets
         top_box_cam1 = self.box_1_y
         bottom_box_cam2 = self.box_2_y+self.box_2_height_px
-        initial_x = -(top_box_cam1-Y1_target)*(self.mm_per_pixel_cam_1_y/1000)
+        initial_y = -(top_box_cam1-Y1_target)*(self.mm_per_pixel_cam_1_y/1000)
         initial_z = (bottom_box_cam2-Y2_target)*(self.mm_per_pixel_cam_2_y/1000)
 
         # Calculate the initial Z position based on the box height and camera distance
         Z1_initial = self.cam1_to_box_distance + initial_z
-        Z2_initial = self.cam2_to_box_distance + initial_x
+        Z2_initial = self.cam2_to_box_distance + initial_y
 
         # Calculate position relative to focal point using pinhole model 
-        Y_3d_relative = -(X1_target - self.cx_cam1)*Z1_initial/self.fx_cam1
-        X_3d_relative = -(Y1_target - self.cy_cam1)*Z1_initial/self.fy_cam1
+        X_3d_relative = -(X1_target - self.cx_cam1)*Z1_initial/self.fx_cam1
+        Y_3d_relative = -(Y1_target - self.cy_cam1)*Z1_initial/self.fy_cam1
         Z_3d_relative = -(Y2_target - self.cy_cam2)*Z2_initial/self.fy_cam2
 
         # apply world-frame shifts/signs
@@ -835,8 +851,8 @@ class ClosedLoopRecorder:
 
         # plot calibration box
         for start, end in edges:
-            xs = [corners[start,1], corners[end,1]]
-            ys = [corners[start,0], corners[end,0]]
+            xs = [corners[start,0], corners[end,0]]
+            ys = [corners[start,1], corners[end,1]]
             zs = [corners[start,2], corners[end,2]]
             self.ax3d.plot(xs, ys, zs, color='red', linestyle='--', linewidth=1, label='Box' if start==0 and end==1 else "")
 
@@ -853,7 +869,7 @@ class ClosedLoopRecorder:
         mid_z = d / 2.0
 
         self.ax3d.set_xlim(mid_x - max_range, mid_x + max_range)
-        self.ax3d.set_ylim(mid_y - max_range, mid_y + max_range) 
+        self.ax3d.set_ylim(mid_y - max_range, mid_y + max_range) #flip Y --> i am stupid and used left hand coordinate system when defining the camera :(
         self.ax3d.set_zlim(mid_z - max_range, mid_z + max_range)
 
 
@@ -896,14 +912,14 @@ class ClosedLoopRecorder:
         self.UMR_2_center_x, self.UMR_2_center_y = undistorted_point_cam2[0,0]
 
         # Calculate position relative to focal point using pinhole model 
-        Y_3d_relative = -(self.UMR_1_center_x - self.cx_cam1)*self.Z1[-1]/self.fx_cam1
-        X_3d_relative = -((self.UMR_1_center_y - self.cy_cam1)*self.Z1[-1]/self.fy_cam1)
-        Z_3d_relative = ((self.UMR_2_center_y - self.cy_cam2)*self.Z2[-1]/self.fy_cam2)
+        X_3d_relative = -(self.UMR_1_center_x - self.cx_cam1)*self.Z1[-1]/self.fx_cam1
+        Y_3d_relative = -(self.UMR_1_center_y - self.cy_cam1)*self.Z1[-1]/self.fy_cam1
+        Z_3d_relative = -(self.UMR_2_center_y - self.cy_cam2)*self.Z2[-1]/self.fy_cam2
 
         # apply world-frame shifts/signs
-        Y_3d_next = (Y_3d_relative-self.Y_shift)
-        X_3d_next = (X_3d_relative+self.X_shift)
-        Z_3d_next = -(Z_3d_relative+self.Z_shift)
+        X_3d_next = (X_3d_relative-self.X_shift)
+        Y_3d_next = (-Y_3d_relative+self.Y_shift)
+        Z_3d_next = (Z_3d_relative+self.Z_shift)
 
         # Append the new 3D coordinates to the lists
         self.X_3d.append(X_3d_next)
@@ -912,7 +928,7 @@ class ClosedLoopRecorder:
 
         # Adjust future depth estimates based on movement in Y and Z, This is assuming smooth motion and small displacements
         Z1_next = self.cam1_to_box_distance+Z_3d_next
-        Z2_next = self.cam2_to_box_distance+X_3d_next
+        Z2_next = self.cam2_to_box_distance+Y_3d_next
         self.Z1.append(Z1_next)
         self.Z2.append(Z2_next)    
 
@@ -942,17 +958,18 @@ class ClosedLoopRecorder:
 
         # make dt robust against zero and outliers
         DT_MIN = 1e-3      # 1 ms lower bound (avoid zero)
-        DT_MAX = 0.10      # 100 ms upper bound
+        DT_MAX = 0.200      # 200 ms upper bound
 
         # Clip dt into a safe range
         dt = min(max(float(dt_raw), DT_MIN), DT_MAX)
-        
+        print(dt)
+        #self.get_logger().info(f"My dt value: {dt}")
         # PITCH CONTROLLER-------------------------------------------------------------------------
         # pitch is controlled by the kuka moving in front or back of the umr
 
         # pick the nearest reference point in the trajectory
         #index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
-        self.index_nearest_reference_point = recorder_functions_right_handed.closest_point_on_polyline_3d(self.trajectory_3d[:, :3],[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
+        self.index_nearest_reference_point = recorder_functions.closest_point_on_polyline_3d(self.trajectory_3d[:, :3],[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
         z_nearest_ref = self.trajectory_3d[self.index_nearest_reference_point, 2]
         pitch_trajectory = self.trajectory_3d[self.index_nearest_reference_point, 3]
 
@@ -990,7 +1007,7 @@ class ClosedLoopRecorder:
         pitch_compensation = u_sat
 
         # apply pitch compensation by moving the kuka in front or back of the UMR
-        delta_pos_pitch_compensation = np.array([np.sin(self.angle_1_filtered)*-pitch_compensation,np.cos(abs(self.angle_1_filtered))*pitch_compensation, 0]) 
+        delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0]) 
 
         # YAW Controller--------------------------------------------------------------------------
         # yaw is controlled by the kuka rotating around the Z axis
@@ -999,12 +1016,12 @@ class ClosedLoopRecorder:
         index_ahead = self.index_nearest_reference_point+self.look_ahead_offset
         if self.index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
             index_ahead = len(self.trajectory_3d) - 1
-        X_nearest_ref = self.trajectory_3d[index_ahead, 0]
+        y_nearest_ref = self.trajectory_3d[index_ahead, 1]
         yaw_trajectory = self.trajectory_3d[index_ahead, 4]
 
         # calculate the yaw correction based on the distance to the traje_ctory
-        dx = self.X_3d[-1] - X_nearest_ref
-        yaw_correction = self.yaw_setpoint_gain * dx
+        dy = self.Y_3d[-1] - y_nearest_ref
+        yaw_correction = self.yaw_setpoint_gain * dy
         yaw_setpoint = yaw_trajectory + yaw_correction  #The desired yaw angle is the trajectory yaw plus the correction
         yaw_setpoint = max(min(yaw_setpoint,  math.pi/2), -math.pi/2) # limit the yaw setpoint to ±90 degrees 
 
@@ -1040,7 +1057,7 @@ class ClosedLoopRecorder:
         delta_pos = current_pos-start_pos + delta_pos_pitch_compensation
 
         #rotate the rot and pos
-        delta_pos, delta_rot = recorder_functions_right_handed.transform_pose(self.R_BoxToKuka,delta_pos, delta_rot)
+        delta_pos, delta_rot = recorder_functions.transform_pose(self.R_BoxToKuka,delta_pos, delta_rot)
 
         #apply to calibrated start position
         self.kuka_new_pos = self.kuka_start_pos+delta_pos
@@ -1086,26 +1103,173 @@ class ClosedLoopRecorder:
             self.yaw_comp_rec.append(yaw_compensation) 
         return 
     
-    def calibrate_kuka(self):
-        """Moves the kuka above the target and sets the staring position and rotation"""
-
-        if self.reconstruction_boolean == False:
-            messagebox.showerror("Error", "First start the trajectory reconstruction!")
+    def controller_curve_experiment(self,time_controller):
+        """Main closed-loop controller: computes pitch/yaw compensation and sends pose to KUKA."""
+        if self.trajectory_3d is None or len(self.trajectory_3d) == 0:
             return
+        
+        # TIME UPDATE -----------------------------------------------------------------------------
+        if self.last_time_controller is None:
+            self.last_time_controller = time_controller
+            return
+        else:
+            dt_raw = time_controller - self.last_time_controller
+            self.last_time_controller = time_controller
 
-        # Define starting location
-        X0, Y0, Z0 = self.compute_initial_world_xyz()
-        Kuka_translation_to_umr = np.array([-Y0,-X0,Z0+self.Z_offset_trim], dtype=float)
-        self.kuka_start_pos = self.kuka_handeye_pos + Kuka_translation_to_umr
+        if self.start_time_controller is None:
+            self.start_time_controller = time_controller
 
-        # Set the startin rotation 
-        self.kuka_start_rot = np.array([-math.pi/2, 0.0,0.0], dtype=float)
+        # make dt robust against zero and outliers
+        DT_MIN = 1e-3      # 1 ms lower bound (avoid zero)
+        DT_MAX = 0.10      # 100 ms upper bound
 
-        # Set the kuka to the correct starting position
-        self.send_pose(self.kuka_start_pos,self.kuka_start_rot)
+        # Clip dt into a safe range
+        dt = min(max(float(dt_raw), DT_MIN), DT_MAX)
+        
+        # PITCH CONTROLLER-------------------------------------------------------------------------
+        # pitch is controlled by the kuka moving in front or back of the umr
 
-        # Set the button to being calibrated
-        self.calibrate_kuka_button.config(text="KUKA Calibrated",style='CalibrateKukaDone.TButton')
+        # pick the nearest reference point in the trajectory
+        #index_nearest_reference_point = recorder_functions.find_nearest_trajectory_point(self.trajectory_3d,self.X_3d[-1],self.Y_3d[-1])
+        self.index_nearest_reference_point = recorder_functions.closest_point_on_polyline_3d(self.trajectory_3d[:, :3],[self.X_3d[-1],self.Y_3d[-1],self.Z_3d[-1]])
+        z_nearest_ref = self.trajectory_3d[self.index_nearest_reference_point, 2]
+        pitch_trajectory = self.trajectory_3d[self.index_nearest_reference_point, 3]
+
+        # calculate pitch setpoint based on the nearest reference point
+        dz = self.Z_3d[-1] - z_nearest_ref
+        pitch_correction = self.pitch_setpoint_gain * dz 
+        pitch_setpoint = pitch_trajectory + pitch_correction  # The desired pitch angle is the trajectory pitch plus the correction
+        pitch_setpoint = max(min(pitch_setpoint,  math.pi/4), -math.pi/4) # limit the pitch setpoint to ±45 degrees
+
+        # Get the error in pitch
+        current_pitch = -self.angle_2_filtered
+        error_pitch = pitch_setpoint - current_pitch
+
+        # get the feedforward pitch compensation based on the trajectory
+        pitch_feedforward = pitch_setpoint*self.pitch_feedforward_gain
+        # Proportional and Integral control for pitch
+        pitch_compensation_pterm = self.Kp_pitch * error_pitch 
+
+        if self.last_error_pitch is None:
+            self.last_error_pitch = error_pitch
+
+        #self.integrator_pitch += error_pitch * dt
+        # trapezoidal integration
+        self.integrator_pitch += 0.5 * self.Ki_pitch * dt * (error_pitch + self.last_error_pitch)
+
+        # Anti-windup: limit the integrator to prevent excessive buildup
+        u_unsat = pitch_compensation_pterm + self.integrator_pitch + pitch_feedforward
+        u_sat   = max(self.pitch_compensation_min, min(u_unsat, self.pitch_compensation_max))
+        self.integrator_pitch += (u_sat - u_unsat) * self.kaw * dt
+        self.integrator_pitch = np.clip(self.integrator_pitch,self.integrator_pitch_min,self.integrator_pitch_max)
+
+        self.last_error_pitch = error_pitch # Store for next iteration
+        pitch_compensation_iterm = self.integrator_pitch
+        
+        pitch_compensation = u_sat
+
+        if time_controller - self.start_time_controller > 60:
+            pitch_compensation = 0  # after 60 seconds, stop pitch compensation
+
+        # apply pitch compensation by moving the kuka in front or back of the UMR
+        delta_pos_pitch_compensation = np.array([np.cos(abs(self.angle_1_filtered))*pitch_compensation, np.sin(self.angle_1_filtered)*-pitch_compensation, 0]) 
+
+        # YAW Controller--------------------------------------------------------------------------
+        # yaw is controlled by the kuka rotating around the Z axis
+
+        # pick the nearest reference point in the trajectory plus and look-ahead offset and find the yaw angle at the reference point
+        index_ahead = self.index_nearest_reference_point+self.look_ahead_offset
+        if self.index_nearest_reference_point + self.look_ahead_offset >= len(self.trajectory_3d):
+            index_ahead = len(self.trajectory_3d) - 1
+        y_nearest_ref = self.trajectory_3d[index_ahead, 1]
+        yaw_trajectory = self.trajectory_3d[index_ahead, 4]
+
+        # calculate the yaw correction based on the distance to the traje_ctory
+        dy = self.Y_3d[-1] - y_nearest_ref
+        yaw_correction = self.yaw_setpoint_gain * dy
+        yaw_setpoint = yaw_trajectory + yaw_correction  #The desired yaw angle is the trajectory yaw plus the correction
+        yaw_setpoint = max(min(yaw_setpoint,  math.pi/2), -math.pi/2) # limit the yaw setpoint to ±90 degrees 
+
+        # Get the error in yaw
+        current_yaw = self.angle_1_filtered  # Assuming angle_1 is the yaw angle
+        error_yaw = yaw_setpoint - current_yaw
+
+        # Proportional and Integral control for yaw   
+        yaw_compensation_pterm = self.Kp_yaw * error_yaw
+
+        if self.last_error_yaw is None:
+            self.last_error_yaw = error_yaw
+
+        #self.integrator_yaw += error_yaw * dt
+        self.integrator_yaw += 0.5 * self.Ki_yaw * dt * (error_yaw + self.last_error_yaw)
+
+        u_unsat = yaw_compensation_pterm + self.integrator_yaw
+        u_sat   = max(self.yaw_compensation_min, min(u_unsat, self.yaw_compensation_max))
+        self.integrator_yaw += (u_sat - u_unsat) * self.kaw * dt
+        self.integrator_yaw = np.clip(self.integrator_yaw, self.integrator_yaw_min,self.integrator_yaw_max)
+
+        self.last_error_yaw = error_yaw
+        yaw_compensation_iterm = self.integrator_yaw
+
+        yaw_compensation = u_sat
+
+        if time_controller - self.start_time_controller > 60:
+            yaw_compensation = np.radians(-30)  # after 1000 seconds, stop yaw compensation to see effect
+
+        # update the rotation of the kuka
+        delta_rot = np.array([0, self.angle_1_filtered+yaw_compensation, 0])  # Apply yaw compensation by rotating the kuka
+
+        # KUKA POSITION UPDATE -----------------------------------------------------------------
+        current_pos = np.array([self.X_3d[-1],self.Y_3d[-1],-self.Z_3d[-1]])
+        start_pos = np.array([self.X_3d[0],self.Y_3d[0],-self.Z_3d[0]])
+        delta_pos = current_pos-start_pos + delta_pos_pitch_compensation
+
+        #rotate the rot and pos
+        delta_pos, delta_rot = recorder_functions.transform_pose(self.R_BoxToKuka,delta_pos, delta_rot)
+
+        #apply to calibrated start position
+        self.kuka_new_pos = self.kuka_start_pos+delta_pos
+        self.kuka_new_rot = self.kuka_start_rot+delta_rot
+
+        #send the new position and rotation
+        self.send_pose(self.kuka_new_pos,self.kuka_new_rot)
+
+
+        # GUI UPDATE ----------------------------------------------------------------------------
+        self.current_yaw_label .config(text=f"{current_yaw:.3f} rad")
+        self.yaw_setpoint_label.config(text=f"{yaw_setpoint:.3f} rad")
+        self.yaw_error_label  .config(text=f"{error_yaw:.3f} rad")
+        self.yaw_pterm_label  .config(text=f"{yaw_compensation_pterm :.3f}")
+        self.yaw_iterm_label  .config(text=f"{yaw_compensation_iterm :.3f}")
+        self.yaw_comp_label   .config(text=f"{yaw_compensation:.3f}")
+
+        self.current_pitch_label .config(text=f"{current_pitch:.3f} rad")
+        self.pitch_setpoint_label.config(text=f"{pitch_setpoint:.3f} rad")
+        self.pitch_feedforward_label.config(text=f"{pitch_feedforward:.3f} rad")
+        self.pitch_error_label   .config(text=f"{error_pitch:.3f} rad")
+        self.pitch_pterm_label   .config(text=f"{pitch_compensation_pterm:.3f}")
+        self.pitch_iterm_label   .config(text=f"{pitch_compensation_iterm:.3f}")
+        self.pitch_comp_label    .config(text=f"{pitch_compensation:.3f}")
+
+        # RECORDING UPDATE------------------------------------------------------------------------
+        if self.recording:
+            # pitch channels
+            self.pitch_setpoint_rec.append(pitch_setpoint)
+            self.pitch_feedforward_rec.append(pitch_feedforward)
+            self.current_pitch_rec.append(current_pitch)
+            self.pitch_error_rec.append(error_pitch)
+            self.pitch_comp_rec.append(pitch_compensation)
+            self.pitch_comp_iterm_rec.append(pitch_compensation_iterm)
+            self.pitch_comp_pterm_rec.append(pitch_compensation_pterm)
+
+            # yaw channels
+            self.current_yaw_rec.append(current_yaw)  
+            self.yaw_setpoint_rec.append(yaw_setpoint)
+            self.yaw_error_rec.append(error_yaw)
+            self.yaw_pterm_rec.append(yaw_compensation_pterm)
+            self.yaw_iterm_rec.append(yaw_compensation_iterm)
+            self.yaw_comp_rec.append(yaw_compensation) 
+        return 
 
     def set_new_velocity(self):
         """Read velocity input (Hz), convert to rad/s, and update motor speed setting."""
@@ -1128,13 +1292,13 @@ class ClosedLoopRecorder:
         """Compute the initial world-frame (X0, Y0, Z0) position of the UMR."""
 
         # back-project into cam1 coordinates
-        Y_rel = -(self.umr_1_center_x- self.cx_cam1) * self.Z1_initial / self.fx_cam1
-        X_rel = -(self.umr_1_center_y - self.cy_cam1) * self.Z1_initial / self.fy_cam1
+        X_rel = -(self.umr_1_center_x- self.cx_cam1) * self.Z1_initial / self.fx_cam1
+        Y_rel = -(self.umr_1_center_y - self.cy_cam1) * self.Z1_initial / self.fy_cam1
         Z_rel = -(self.UMR_2_center_y - self.cy_cam2) * self.Z2[-1] / self.fy_cam2
 
         # shift into box-corner world frame
-        Y0 = Y_rel - self.Y_shift
-        X0 = X_rel + self.X_shift
+        X0 = X_rel - self.X_shift
+        Y0 = -Y_rel + self.Y_shift
         Z0 = Z_rel + self.Z_shift
 
         return X0, Y0, Z0
@@ -1189,7 +1353,7 @@ class ClosedLoopRecorder:
                 cv2.rectangle(frame1_display, (x,y), (x+w,y+h), (255,0,0), 4)
 
                 # Update the tracker 
-                self.UMR_1_bounding_box, self.UMR_1_roi,self.UMR_1_angle_measured, self.UMR_1_center_x, self.UMR_1_center_y = recorder_functions_right_handed.update_roi_center(frame1, self.UMR_1_roi)
+                self.UMR_1_bounding_box, self.UMR_1_roi,self.UMR_1_angle_measured, self.UMR_1_center_x, self.UMR_1_center_y = recorder_functions.update_roi_center(frame1, self.UMR_1_roi)
 
                 # Draw the bounding box around the umr
                 x, y, w, h = [int(v) for v in self.UMR_1_roi]
@@ -1211,7 +1375,7 @@ class ClosedLoopRecorder:
                 cv2.rectangle(frame2_display, (x,y), (x+w,y+h), (255,0,0), 4)
 
                 # Update the tracker 
-                self.UMR_2_bounding_box,self.UMR_2_roi,self.UMR_2_angle_measured, self.UMR_2_center_x, self.UMR_2_center_y = recorder_functions_right_handed.update_roi_center(frame2, self.UMR_2_roi)
+                self.UMR_2_bounding_box,self.UMR_2_roi,self.UMR_2_angle_measured, self.UMR_2_center_x, self.UMR_2_center_y = recorder_functions.update_roi_center(frame2, self.UMR_2_roi)
                 
                 # draw the bounding box around the umr
                 x, y, w, h = [int(v) for v in self.UMR_2_roi]
@@ -1242,7 +1406,7 @@ class ClosedLoopRecorder:
                 print("First turn the reconstructor on")
                 return
             time_controller = time.perf_counter()
-            self.controller_curve_experiment(time_controller) # or self.straight_controller(time_controller) for straight controller
+            self.controller(time_controller) # or self.straight_controller(time_controller) for straight controller
 
         self.window.after(10, self.update_frame)
 
@@ -1328,3 +1492,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = ClosedLoopRecorder(root)
     root.mainloop()
+
